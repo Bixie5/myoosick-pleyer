@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.myoosick.pleyer'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.myoosick.pleyer"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        ndk {
+            // phones (arm64 / older arm) + emulator (x86_64)
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+        }
+        python {
+            version "3.12"
+            pip {
+                install "flask>=3.0"
+                install "requests>=2.31"
+                install "yt-dlp"
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release { minifyEnabled false }
+    }
+}
