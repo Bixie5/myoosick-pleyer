@@ -16,7 +16,7 @@ android {
 
         ndk {
             // phones (arm64 / older arm) + emulator (x86_64)
-            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+               abiFilters "arm64-v8a", "x86_64"
         }
         python {
             version "3.12"
