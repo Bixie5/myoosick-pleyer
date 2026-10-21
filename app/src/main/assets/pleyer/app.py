@@ -24,9 +24,20 @@ DOWNLOADS = Path(os.environ.get("MYOOSICK PLEYER_DOWNLOADS", BASE / "downloads")
 DOWNLOADS.mkdir(parents=True, exist_ok=True)
 
 HAS_FFMPEG = shutil.which("ffmpeg") is not None
-AUDIO_EXT = {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".webm", ".flac", ".wav", ".mka"}
+AUDIO_EXT = {".mp3", ".mp4", ".m4a", ".aac", ".ogg", ".opus", ".webm", ".flac", ".wav", ".mka"}
 
 app = Flask(__name__, static_folder=None)
+
+
+@app.errorhandler(Exception)
+def _json_errors(e):
+    """Always answer the UI with JSON (never an HTML error page)."""
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return jsonify(error=e.description or e.name), e.code
+    app.logger.exception("Unhandled error")
+    return jsonify(error=clean_err(e)), 500
+
 
 
 # --------------------------------------------------------------------------
@@ -111,6 +122,114 @@ def search():
             }
         )
     return jsonify(results=results)
+
+
+# --------------------------------------------------------------------------
+# discover: "radio" mode - songs related to the one that's playing.
+# Uses YouTube's own Mix playlist for the current video (the same engine behind
+# YouTube Music radio); falls back to a "songs like ..." search.
+# --------------------------------------------------------------------------
+_YT_ID = re.compile(r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/)([A-Za-z0-9_-]{11})")
+_NOISE = re.compile(
+    r"[\(\[][^\)\]]*(official|lyric|video|audio|visuali[sz]er|remaster|4k|hd|mv)[^\)\]]*[\)\]]", re.I
+)
+
+
+def yt_id(url: str):
+    m = _YT_ID.search(url or "")
+    return m.group(1) if m else None
+
+
+def norm_title(t: str) -> str:
+    t = _NOISE.sub(" ", t or "").lower()
+    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+
+
+def entry_to_result(e: dict):
+    vid = e.get("id")
+    url = e.get("url") or e.get("webpage_url")
+    if not url or not is_url(url):
+        url = f"https://www.youtube.com/watch?v={vid}" if vid else None
+    if not url:
+        return None
+    thumbs = e.get("thumbnails") or []
+    thumb = thumbs[-1].get("url") if thumbs else None
+    if not thumb and vid:
+        thumb = f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg"
+    return {
+        "id": vid or yt_id(url),
+        "title": e.get("title") or "Untitled",
+        "uploader": e.get("uploader") or e.get("channel") or "",
+        "duration": e.get("duration"),
+        "thumbnail": thumb,
+        "url": url,
+    }
+
+
+def _flat_entries(target: str, limit: int) -> list:
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": True,
+        "skip_download": True,
+        "playlistend": limit,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(target, download=False)
+    return [e for e in ((info or {}).get("entries") or []) if e]
+
+
+@app.get("/api/related")
+def related():
+    seed_url = request.args.get("u", "").strip()
+    q = request.args.get("q", "").strip()
+    exclude = {x for x in request.args.get("exclude", "").split(",") if x}
+    try:
+        n = max(1, min(int(request.args.get("n", "20")), 40))
+    except ValueError:
+        n = 20
+
+    seed_vid = yt_id(seed_url)
+    seed_norm = norm_title(q)
+    seen_titles = set()
+    results = []
+    via = None
+    errors = []
+
+    def collect(entries):
+        for e in entries:
+            r = entry_to_result(e)
+            if not r or not r["id"]:
+                continue
+            if r["id"] == seed_vid or r["id"] in exclude:
+                continue
+            d = r["duration"]
+            if d is not None and not (60 <= d <= 720):  # skip clips, mixes, hour-long videos
+                continue
+            nt = norm_title(r["title"])
+            if nt and (nt in seen_titles or (seed_norm and nt == seed_norm)):
+                continue  # same song again under another upload
+            seen_titles.add(nt)
+            results.append(r)
+
+    if seed_vid:
+        try:
+            collect(_flat_entries(
+                f"https://www.youtube.com/watch?v={seed_vid}&list=RD{seed_vid}", 40))
+            via = "mix"
+        except Exception as e:  # noqa: BLE001
+            errors.append(clean_err(e))
+
+    if len(results) < 3 and (q or seed_vid):
+        try:
+            collect(_flat_entries(f"ytsearch30:songs like {q or seed_vid}", 30))
+            via = via or "search"
+        except Exception as e:  # noqa: BLE001
+            errors.append(clean_err(e))
+
+    if not results and errors:
+        return jsonify(error=errors[-1]), 502
+    return jsonify(results=results[:n], via=via)
 
 
 # --------------------------------------------------------------------------

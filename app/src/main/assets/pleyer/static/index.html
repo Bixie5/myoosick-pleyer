@@ -607,6 +607,16 @@ audio.addEventListener('ended', async () => {
   i < 0 ? stop() : playIndex(i);
 });
 audio.addEventListener('play', () => { if (state.discover) discoverPrefetch(); });
+// when a web song won't play, ask the server why and show its real error
+audio.addEventListener('error', async () => {
+  const t = cur(); if (!t || t.source !== 'web' || !audio.src) return;
+  try {
+    const r = await fetch(t.src, { headers: { Range: 'bytes=0-1' } });
+    if ((r.headers.get('content-type') || '').includes('json')) { const j = await r.json(); toast('STREAM ERROR: ' + String(j.error || r.status).slice(0, 180), true); }
+    else if (!r.ok) toast('STREAM HTTP ' + r.status, true);
+    else if (r.body) r.body.cancel();
+  } catch (e) {}
+});
 let discFails = 0;   // skip tracks that won't play while the radio is on (stop after 3 in a row)
 audio.addEventListener('playing', () => { discFails = 0; });
 audio.addEventListener('error', () => {
@@ -714,7 +724,8 @@ function discoverMore() {
     if (seed.source === 'web' && seed.ref) params.set('u', seed.ref);
     try {
       const r = await fetch('/api/related?' + params);
-      const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+      let j; try { j = await r.json(); } catch (e) { throw new Error(r.status === 404 ? 'APP.PY IS OUTDATED - UPDATE IT' : 'BAD SERVER REPLY (' + r.status + ')'); }
+      if (!r.ok) throw new Error(j.error || r.statusText);
       const fresh = j.results.filter(x => !state.seen.has(x.id));
       state.pool = state.pool.filter(p => !state.seen.has(p.id));
       const top = fresh.slice(0, 8), picks = [];
