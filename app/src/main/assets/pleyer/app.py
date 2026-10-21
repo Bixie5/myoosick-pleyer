@@ -24,20 +24,9 @@ DOWNLOADS = Path(os.environ.get("MYOOSICK PLEYER_DOWNLOADS", BASE / "downloads")
 DOWNLOADS.mkdir(parents=True, exist_ok=True)
 
 HAS_FFMPEG = shutil.which("ffmpeg") is not None
-AUDIO_EXT = {".mp3", ".mp4", ".m4a", ".aac", ".ogg", ".opus", ".webm", ".flac", ".wav", ".mka"}
+AUDIO_EXT = {".mp3", ".m4a", ".aac", ".ogg", ".opus", ".webm", ".flac", ".wav", ".mka"}
 
 app = Flask(__name__, static_folder=None)
-
-
-@app.errorhandler(Exception)
-def _json_errors(e):
-    """Always answer the UI with JSON (never an HTML error page)."""
-    from werkzeug.exceptions import HTTPException
-    if isinstance(e, HTTPException):
-        return jsonify(error=e.description or e.name), e.code
-    app.logger.exception("Unhandled error")
-    return jsonify(error=clean_err(e)), 500
-
 
 
 # --------------------------------------------------------------------------
