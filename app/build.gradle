@@ -15,15 +15,15 @@ android {
         versionName "1.0"
 
         ndk {
-            // phones (arm64 / older arm) + emulator (x86_64)
-               abiFilters "arm64-v8a", "x86_64"
+            // modern 64-bit phones (arm64) + emulator (x86_64)
+            abiFilters "arm64-v8a", "x86_64"
         }
         python {
             version "3.12"
             pip {
                 install "flask>=3.0"
                 install "requests>=2.31"
-                install "yt-dlp"
+                install "yt-dlp>=2026.8.19"
             }
         }
     }

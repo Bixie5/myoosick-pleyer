@@ -612,7 +612,7 @@ audio.addEventListener('error', async () => {
   const t = cur(); if (!t || t.source !== 'web' || !audio.src) return;
   try {
     const r = await fetch(t.src, { headers: { Range: 'bytes=0-1' } });
-    if ((r.headers.get('content-type') || '').includes('json')) { const j = await r.json(); toast('STREAM ERROR: ' + String(j.error || r.status).slice(0, 180), true); }
+    if ((r.headers.get('content-type') || '').includes('json')) { const j = await r.json(); toast('STREAM ERROR: ' + String(j.error || r.status).slice(0, 420), true); }
     else if (!r.ok) toast('STREAM HTTP ' + r.status, true);
     else if (r.body) r.body.cancel();
   } catch (e) {}
