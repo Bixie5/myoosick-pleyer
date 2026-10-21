@@ -36,6 +36,7 @@ public class MainActivity extends Activity {
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
+        s.setUserAgentString(s.getUserAgentString() + " MyoosickAndroid");  // tells the page to use the phone layout
         s.setDomStorageEnabled(true);                 // queue / volume / settings persistence
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setAllowFileAccess(false);

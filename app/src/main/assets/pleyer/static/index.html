@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>MYOOSICK PLEYER</title>
+<script>if (/MyoosickAndroid/.test(navigator.userAgent)) document.documentElement.classList.add('android');</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Special+Elite&family=VT323&display=swap" rel="stylesheet">
@@ -193,7 +194,7 @@ input[type=text]::placeholder{color:var(--amber-dim)}
 .dl .prog i{display:block; height:100%; width:0; background:var(--amber); box-shadow:0 0 8px var(--amber)}
 .dl.error{color:#ff6a4a}
 .section{padding:6px 10px; font-family:var(--px); font-size:7px; color:var(--amber-soft); background:#1d1300}
-.hint{padding:8px 12px; font-size:18px; color:var(--amber-soft)}
+.hint{padding:8px 12px; font-size:18px; color:var(--amber-soft); white-space:pre-line}
 
 footer{display:flex; gap:16px; justify-content:space-between; flex-wrap:wrap; padding:10px 22px 14px; font-family:var(--px); font-size:7px; line-height:1.8; border-top:3px solid rgba(0,0,0,.15)}
 kbd{font-family:var(--px); font-size:7px; background:#f3ecd9; border:1px solid var(--ink); border-radius:3px; padding:2px 4px; box-shadow:0 2px 0 #7d745f}
@@ -206,6 +207,78 @@ kbd{font-family:var(--px); font-size:7px; background:#f3ecd9; border:1px solid v
 #drop{position:fixed; inset:0; z-index:70; display:none; align-items:center; justify-content:center; background:rgba(21,14,0,.88); color:var(--amber); font-family:var(--px); font-size:22px; text-shadow:0 0 12px var(--amber); border:6px dashed var(--amber); margin:14px}
 #drop.show{display:flex}
 @media (prefers-reduced-motion:reduce){.reel,.marquee span.scroll{animation:none}}
+
+/* =====================================================================
+   ANDROID APP LAYOUT (only when the app sets html.android)
+   fixed screen, no page scroll, wood fills the phone, one display panel
+   ===================================================================== */
+.modes,.tape-strip{display:none}
+html.android,html.android body{height:100%; overflow:hidden; overscroll-behavior:none; -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none}
+html.android input[type=text]{-webkit-user-select:text; user-select:text}
+html.android body{padding:0; display:block; min-height:0; background:#5f3e1f}
+html.android body::after{background:repeating-linear-gradient(0deg, rgba(0,0,0,.06) 0 1px, transparent 1px 3px)}
+html.android .wood{position:fixed; inset:0; width:auto; border-radius:0; padding:8px; box-shadow:none}
+html.android .deck{height:100%; display:flex; flex-direction:column; overflow:hidden; border-width:3px; border-radius:12px}
+html.android .brand{flex:none; flex-wrap:nowrap; padding:8px 10px 4px; gap:8px}
+html.android .logo{font-size:11px; letter-spacing:1px; white-space:nowrap; text-shadow:1px 1px 0 rgba(255,255,255,.5)}
+html.android .stripes{min-width:16px; height:10px}
+html.android .leds{font-size:6px; gap:6px}
+html.android .model, html.android footer, html.android .tabs, html.android .screen, html.android #btnDisc{display:none}
+html.android .grid{flex:1; min-height:0; display:flex; flex-direction:column; padding:2px 8px 8px; gap:0}
+html.android .player{flex:1; min-height:0; display:flex; flex-direction:column}
+
+/* the display panel: tape view <-> pane view */
+html.android .cassette-well{flex:1; min-height:0; display:flex; flex-direction:column; gap:6px; padding:6px}
+html.android #tapeView{flex:1; min-height:0; display:flex; align-items:center; justify-content:center}
+html.android #cassette{width:100%; height:100%}
+html.android #paneView{display:none; flex:1; min-height:0; flex-direction:column}
+html.android[data-view=pane] #tapeView{display:none}
+html.android[data-view=pane] #paneView{display:flex}
+html.android[data-view=pane] .tape-strip{display:flex}
+html.android .panes{flex:1; min-height:0}
+html.android .list{max-height:none}
+html.android .row{font-size:20px; padding:6px 8px}
+html.android .row.res{grid-template-columns:56px minmax(0,1fr) auto auto}
+html.android .thumb{width:56px; height:42px}
+html.android .bar{padding:8px}
+html.android input[type=text]{font-size:18px}
+html.android .empty{font-size:18px; padding:14px 12px}
+html.android .empty pre{font-size:18px}
+
+/* tape strip: the small tape that shows the title; tap it to go back to the full tape */
+html.android .tape-strip{align-items:center; gap:8px; flex:none; width:100%; padding:4px 8px; cursor:pointer; background:#34302b; border:2px solid #111; border-radius:8px; font:inherit; color:var(--ink)}
+.ts-reel{width:24px; height:24px; flex:none; border-radius:50%; border:2px solid #222; animation:spin 2.4s linear infinite; animation-play-state:paused;
+  background:radial-gradient(circle,#ece6d4 0 30%,transparent 32%), repeating-conic-gradient(#ece6d4 0 25deg,#222 25deg 60deg)}
+.is-playing .ts-reel{animation-play-state:running}
+.ts-label{flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; padding:12px 6px 2px; border:2px solid #1b1914; border-radius:4px;
+  background:linear-gradient(#e8742a 0 5px,#e0412b 5px 8px,#2f8f85 8px 11px,#f1e6c8 11px)}
+.ts-title{max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:var(--type); font-size:15px; line-height:1.1}
+.ts-sub{font-family:var(--px); font-size:5px; color:#6b5b3f; margin-top:2px}
+
+/* the 4 mode buttons */
+html.android .modes{display:flex; gap:6px; margin-top:8px; flex:none}
+html.android .modes .btn{flex:1 1 0; min-width:0; padding:10px 2px; font-size:8px}
+html.android .btn.sel{background:linear-gradient(#a89f86,#c9bfa5); transform:translateY(4px); box-shadow:0 1px 0 #7d745f, inset 0 3px 6px rgba(0,0,0,.35)}
+html.android .btn.on.sel{background:linear-gradient(#e8a21a,#ffd27a); box-shadow:0 1px 0 #8a5d00, 0 0 12px rgba(255,176,0,.7), inset 0 3px 6px rgba(0,0,0,.25)}
+
+/* compact readout + transport */
+html.android .lcd{margin-top:8px; padding:6px 10px; font-size:20px; flex:none}
+html.android .lcd-top{font-size:14px}
+html.android .marquee{font-size:24px; margin-top:2px}
+html.android #artist{font-size:16px; height:18px}
+html.android #viz{height:40px; margin-top:4px}
+html.android .time{font-size:30px; white-space:nowrap; letter-spacing:1px}
+html.android .time small{font-size:18px}
+html.android #vu{width:84px; height:26px; flex:none}
+html.android .seekwrap{margin-top:6px; flex:none}
+html.android .controls{margin-top:4px; flex-wrap:nowrap; gap:6px; flex:none}
+html.android .controls .btn{min-width:0; flex:1 1 0; padding:11px 4px}
+html.android .controls .btn.big{flex:1.6 1 0}
+html.android .mix{margin-top:10px; flex:none}
+html.android #toasts{top:52px; bottom:auto; left:10px; right:10px}
+html.android .toast{max-width:none}
+@media (max-height:660px){ html.android #viz{display:none} }
+@media (max-height:520px){ html.android .lcd, html.android .seekwrap, html.android .controls, html.android .mix{display:none} }  /* keyboard open */
 </style>
 </head>
 <body>
@@ -224,7 +297,13 @@ kbd{font-family:var(--px); font-size:7px; background:#f3ecd9; border:1px solid v
   <div class="grid">
     <!-- ================= PLAYER ================= -->
     <section class="player">
-      <div class="cassette-well">
+      <div class="cassette-well" id="displayPanel">
+        <button class="tape-strip" id="tapeStrip" type="button" aria-label="Back to the tape">
+          <span class="ts-reel"></span>
+          <span class="ts-label"><span class="ts-title" id="stripTitle">INSERT TAPE</span><span class="ts-sub">TAP TAPE TO RETURN</span></span>
+          <span class="ts-reel"></span>
+        </button>
+        <div id="tapeView">
         <svg id="cassette" viewBox="0 0 320 210" role="img" aria-label="Cassette tape">
           <rect x="3" y="3" width="314" height="204" rx="14" fill="#34302b" stroke="#111" stroke-width="3"/>
           <circle cx="16" cy="16" r="3.5" fill="#15130f"/><circle cx="304" cy="16" r="3.5" fill="#15130f"/>
@@ -262,12 +341,21 @@ kbd{font-family:var(--px); font-size:7px; background:#f3ecd9; border:1px solid v
           <circle cx="104" cy="191" r="5" fill="#0f0e0c"/><circle cx="216" cy="191" r="5" fill="#0f0e0c"/>
           <rect x="140" y="186" width="10" height="10" rx="2" fill="#0f0e0c"/><rect x="170" y="186" width="10" height="10" rx="2" fill="#0f0e0c"/>
         </svg>
+        </div>
+        <div id="paneView"></div>
+      </div>
+
+      <div class="modes" id="modes">
+        <button class="btn mode" data-mode="queue" type="button">QUEUE</button>
+        <button class="btn mode" data-mode="search" type="button">SEARCH</button>
+        <button class="btn mode" data-mode="library" type="button">LIBRARY</button>
+        <button class="btn mode" data-mode="disc" id="modeDisc" type="button">DISC</button>
       </div>
 
       <div class="lcd" aria-live="off">
         <div class="lcd-top">
           <span id="status">STOP</span>
-          <span><span class="flag" id="fShuf">SHUF</span><span class="flag" id="fRep">REP</span><span class="flag on" id="fSrc">---</span></span>
+          <span><span class="flag" id="fShuf">SHUF</span><span class="flag" id="fRep">REP</span><span class="flag" id="fDisc">DISC</span><span class="flag on" id="fSrc">---</span></span>
         </div>
         <div class="marquee"><span id="title">INSERT TAPE</span></div>
         <div id="artist">&nbsp;</div>
@@ -290,6 +378,7 @@ kbd{font-family:var(--px); font-size:7px; background:#f3ecd9; border:1px solid v
         <button class="btn" id="btnNext" title="Next (N)" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M15 5h3v14h-3zM4 5l10 7L4 19z"/></svg></button>
         <button class="btn" id="btnShuf" title="Shuffle (S)">SHUF</button>
         <button class="btn" id="btnRep" title="Repeat (R)">REP</button>
+        <button class="btn" id="btnDisc" title="Discover: keep playing similar songs (D)">DISC</button>
       </div>
 
       <div class="mix">
@@ -339,6 +428,15 @@ PASTE A LINK TO LOAD A VIDEO OR PLAYLIST.</div></div>
             <div id="library"></div>
           </div>
         </div>
+
+        <div class="pane" id="pane-disc">
+          <div class="bar">
+            <button class="btn sm" id="discSwitch" type="button">RADIO: OFF</button>
+            <span class="grow"></span>
+            <button class="btn sm" id="discMore" type="button">+ MORE</button>
+          </div>
+          <div class="list" id="discList"></div>
+        </div>
       </div>
     </section>
   </div>
@@ -360,8 +458,8 @@ PASTE A LINK TO LOAD A VIDEO OR PLAYLIST.</div></div>
 const $ = s => document.querySelector(s);
 const audio = $('#audio');
 const AUDIO_RE = /\.(mp3|flac|ogg|oga|opus|wav|m4a|aac|wma|webm|mka)$/i;
-const state = { queue: [], index: -1, shuffle: false, repeat: 'off', dl: new Map(), library: [] };
-let loadedUid = null, uid = 0, dragging = false, preMute = null;
+const state = { queue: [], index: -1, shuffle: false, repeat: 'off', discover: false, pool: [], seen: new Set(), history: [], hops: 0, dl: new Map(), library: [] };
+let loadedUid = null, uid = 0, dragging = false, preMute = null, viewMode = 'tape';
 
 /* ---------- tiny helpers ---------- */
 function h(tag, attrs = {}, ...kids) {
@@ -402,7 +500,7 @@ function addTracks(list, { play = false } = {}) {
   else if (state.index < 0) { state.index = 0; updateNow(); }
   renderQueue(); saveQueue();
 }
-function renderQueue() {
+function renderQueueList() {
   const box = $('#queue'); box.replaceChildren();
   if (!state.queue.length) {
     box.append(h('div', { class: 'empty' }, h('pre', {}, ' .--------.\n | (o)(o) |\n \'--------\''), 'NO TAPES LOADED.\nADD FILES, DROP THEM HERE,\nOR SEARCH THE AIRWAVES.'));
@@ -444,7 +542,7 @@ function saveQueue() {
   } catch (e) {}
 }
 function saveSettings() {
-  try { localStorage.setItem('myoosick_pleyer.settings', JSON.stringify({ vol: +$('#vol').value, shuffle: state.shuffle, repeat: state.repeat })); } catch (e) {}
+  try { localStorage.setItem('myoosick_pleyer.settings', JSON.stringify({ vol: +$('#vol').value, shuffle: state.shuffle, repeat: state.repeat, discover: state.discover })); } catch (e) {}
 }
 
 /* ---------- playback ---------- */
@@ -476,12 +574,16 @@ function stop() {
 function nextIndex(auto) {
   const n = state.queue.length; if (!n) return -1;
   if (state.repeat === 'one' && auto) return state.index;
+  if (state.discover) { const j = state.index + 1; return j < n ? j : -1; }  // radio plays in order
   if (state.shuffle && n > 1) { let r; do { r = Math.floor(Math.random() * n); } while (r === state.index); return r; }
   let i = state.index + 1;
   if (i >= n) { if (state.repeat === 'all' || !auto) i = 0; else return -1; }
   return i;
 }
-function next() { const i = nextIndex(false); if (i >= 0) playIndex(i); }
+async function next() {
+  if (state.discover && state.index + 1 >= state.queue.length) await discoverMore();
+  const i = nextIndex(false); if (i >= 0) playIndex(i);
+}
 function prev() {
   if (audio.currentTime > 3) { audio.currentTime = 0; return; }
   const n = state.queue.length; if (!n) return;
@@ -499,7 +601,19 @@ audio.addEventListener('loadedmetadata', () => {
   updateTime();
 });
 audio.addEventListener('timeupdate', updateTime);
-audio.addEventListener('ended', () => { const i = nextIndex(true); i < 0 ? stop() : playIndex(i); });
+audio.addEventListener('ended', async () => {
+  let i = nextIndex(true);
+  if (i < 0 && state.discover) { await discoverMore(); i = nextIndex(true); }
+  i < 0 ? stop() : playIndex(i);
+});
+audio.addEventListener('play', () => { if (state.discover) discoverPrefetch(); });
+let discFails = 0;   // skip tracks that won't play while the radio is on (stop after 3 in a row)
+audio.addEventListener('playing', () => { discFails = 0; });
+audio.addEventListener('error', () => {
+  if (!state.discover || !audio.src) return;
+  if (++discFails > 3) { discFails = 0; return toast("DISCOVER STOPPED: SONGS WON'T PLAY. CHECK CONNECTION / UPDATE YT-DLP", true); }
+  setTimeout(() => { if (state.discover) next(); }, 800);
+});
 audio.addEventListener('error', () => {
   if (!audio.getAttribute('src')) return;
   setStatus('ERROR');
@@ -538,6 +652,7 @@ function updateNow() {
   const trunc = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
   $('#labelTitle').textContent = trunc(title.toUpperCase(), 22);
   $('#labelSub').textContent = t ? trunc(t.artist || 'SIDE A', 30) : 'SIDE A';
+  $('#stripTitle').textContent = trunc(title.toUpperCase(), 40);
   document.title = t ? `${audio.paused ? '' : '▶ '}${t.title} — MYOOSICK PLEYER` : 'MYOOSICK PLEYER';
   updateTime(); updateMediaMeta();
 }
@@ -564,11 +679,68 @@ function applyModes() {
   $('#btnShuf').classList.toggle('on', state.shuffle); $('#fShuf').classList.toggle('on', state.shuffle);
   $('#btnRep').classList.toggle('on', state.repeat !== 'off'); $('#fRep').classList.toggle('on', state.repeat !== 'off');
   $('#btnRep').textContent = state.repeat === 'one' ? 'REP 1' : 'REP';
+  $('#btnDisc').classList.toggle('on', state.discover); $('#fDisc').classList.toggle('on', state.discover);
+  $('#modeDisc').classList.toggle('on', state.discover); if (viewMode === 'disc') renderDisc();
   $('#fRep').textContent = state.repeat === 'one' ? 'REP1' : 'REP';
 }
 function toggleShuffle() { state.shuffle = !state.shuffle; applyModes(); saveSettings(); }
 function cycleRepeat() { state.repeat = { off: 'all', all: 'one', one: 'off' }[state.repeat]; applyModes(); saveSettings(); }
 $('#btnShuf').onclick = toggleShuffle; $('#btnRep').onclick = cycleRepeat;
+
+/* ---------- discover (radio) ----------
+   While DISC is on, the queue is kept topped up with songs similar to the one playing.
+   Picks are semi-random: 2 from the closest matches, 1 older leftover from the pool, and every
+   5th hop the seed jumps to a song played earlier so the radio drifts instead of looping. */
+const vidOf = t => { const m = /(?:[?&]v=|youtu\.be\/|\/shorts\/)([\w-]{11})/.exec((t && t.ref) || ''); return m ? m[1] : null; };
+const seedText = t => [t.artist, t.title].filter(Boolean).join(' ')
+  .replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[\(\[][^\)\]]*[\)\]]/g, ' ').replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
+function markSeen(t) {
+  if (!t) return;
+  const v = vidOf(t); if (v) state.seen.add(v);
+  if (t.source === 'web' && t.ref && !state.history.some(x => x.ref === t.ref)) { state.history.push(t); if (state.history.length > 30) state.history.shift(); }
+}
+const takeRandom = a => a.splice(Math.floor(Math.random() * a.length), 1)[0];
+let discBusy = null;
+function discoverPrefetch() { markSeen(cur()); if (state.queue.length - 1 - state.index < 2) discoverMore(); }
+function discoverMore() {
+  if (discBusy) return discBusy;
+  discBusy = (async () => {
+    const t = cur();
+    if (!t) { toast('SEARCH OR ADD A SONG FIRST'); return; }
+    markSeen(t);
+    let seed = t;
+    if (++state.hops % 5 === 0 && state.history.length > 3) seed = state.history[Math.floor(Math.random() * state.history.length)];
+    const params = new URLSearchParams({ q: seedText(seed), exclude: [...state.seen].slice(-100).join(',') });
+    if (seed.source === 'web' && seed.ref) params.set('u', seed.ref);
+    try {
+      const r = await fetch('/api/related?' + params);
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+      const fresh = j.results.filter(x => !state.seen.has(x.id));
+      state.pool = state.pool.filter(p => !state.seen.has(p.id));
+      const top = fresh.slice(0, 8), picks = [];
+      while (picks.length < 2 && top.length) picks.push(takeRandom(top));
+      if (state.pool.length) picks.push(takeRandom(state.pool));
+      const used = new Set(picks.map(p => p.id));
+      fresh.forEach(x => { if (!used.has(x.id) && !state.pool.some(p => p.id === x.id)) state.pool.push(x); });
+      state.pool = state.pool.slice(-40);
+      if (!picks.length) { toast('NO SIMILAR TRACKS FOUND', true); return; }
+      picks.sort(() => Math.random() - 0.5);
+      picks.forEach(p => state.seen.add(p.id));
+      addTracks(picks.map(webTrack));
+      const cut = state.index - 20;                       // forget old played tracks
+      if (cut > 0) { state.queue.splice(0, cut); state.index -= cut; renderQueue(); saveQueue(); }
+    } catch (e) { toast('DISCOVER FAILED: ' + e.message, true); }
+  })().finally(() => { discBusy = null; });
+  return discBusy;
+}
+function toggleDiscover() {
+  state.discover = !state.discover; applyModes(); saveSettings();
+  if (!state.discover) return toast('DISCOVER OFF');
+  toast('DISCOVER ON - SIMILAR SONGS WILL KEEP PLAYING');
+  if (!state.queue.length) toast('SEARCH A SONG TO START');
+  else if (!audio.paused) discoverPrefetch();
+}
+$('#btnDisc').onclick = toggleDiscover;
 
 const seek = $('#seek');
 seek.addEventListener('input', () => { dragging = true; fillRange(seek); $('#cur').textContent = fmt(seek.value / 1000 * trackDur()); });
@@ -624,6 +796,50 @@ function showTab(name) {
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
   if (name === 'search') $('#q').focus();
   if (name === 'library') loadLibrary();
+  if (name === 'queue') renderQueue();
+  if (name === 'disc') renderDisc();
+}
+
+/* ---------- android: one display panel that doubles as queue / search / library / discover ---------- */
+const IS_ANDROID = document.documentElement.classList.contains('android');
+function renderQueue() { renderQueueList(); if (viewMode === 'disc') renderDisc(); }
+function setView(mode) {
+  viewMode = mode;
+  document.documentElement.dataset.view = mode === 'tape' ? 'tape' : 'pane';
+  document.querySelectorAll('.mode').forEach(b => b.classList.toggle('sel', b.dataset.mode === mode));
+  if (mode !== 'tape') showTab(mode);
+}
+function renderDisc() {
+  const sw = $('#discSwitch'); sw.textContent = 'RADIO: ' + (state.discover ? 'ON' : 'OFF'); sw.classList.toggle('on', state.discover);
+  const box = $('#discList'), t = cur(); box.replaceChildren();
+  box.append(h('div', { class: 'hint' }, state.discover
+    ? (t ? 'RADIO ON. SIMILAR SONGS KEEP PLAYING.\nSEEDED BY: ' + t.title : 'RADIO ON. PLAY A SONG TO START.')
+    : 'RADIO OFF. TURN IT ON AND SIMILAR SONGS KEEP PLAYING.'));
+  const row = (title, sub, dur, onclick) => h('div', { class: 'row', onclick },
+    h('div', { class: 'idx' }, '♪'),
+    h('div', { class: 'info' }, h('div', { class: 't' }, title), sub ? h('div', { class: 's' }, sub) : null),
+    h('div', { class: 'd' }, fmt(dur)), h('div', { class: 'acts' }));
+  box.append(h('div', { class: 'section' }, 'UP NEXT'));
+  const ahead = state.queue.map((x, i) => [x, i]).filter(([, i]) => i > state.index);
+  if (!ahead.length) box.append(h('div', { class: 'hint' }, state.discover ? 'NOTHING QUEUED YET. TAP + MORE.' : '---'));
+  ahead.slice(0, 40).forEach(([x, i]) => box.append(row(x.title, x.artist, x.duration, () => playIndex(i))));
+  if (state.pool.length) {
+    box.append(h('div', { class: 'section' }, 'IN THE POOL'));
+    state.pool.slice(0, 25).forEach(r => box.append(row(r.title, r.uploader, r.duration, () => addTracks([webTrack(r)], { play: true }))));
+  }
+}
+if (IS_ANDROID) {
+  $('#paneView').append($('.panes'));
+  $('#q').placeholder = 'SEARCH OR PASTE LINK';
+  document.querySelectorAll('.mode').forEach(b => b.onclick = () => {
+    const m = b.dataset.mode;
+    if (viewMode === m) return setView('tape');
+    setView(m);
+    if (m === 'disc' && !state.discover) toggleDiscover();   // opening Discover also turns the radio on
+  });
+  $('#tapeStrip').onclick = () => setView('tape');
+  $('#discSwitch').onclick = toggleDiscover;
+  $('#discMore').onclick = () => { if (!state.queue.length) toast('SEARCH OR ADD A SONG FIRST'); else discoverMore(); };
 }
 
 /* ---------- online search ---------- */
@@ -799,6 +1015,7 @@ addEventListener('keydown', e => {
   else if (k === 'p' || k === 'P') prev();
   else if (k === 's' || k === 'S') toggleShuffle();
   else if (k === 'r' || k === 'R') cycleRepeat();
+  else if (k === 'd' || k === 'D') toggleDiscover();
   else if (k === 'm' || k === 'M') { if (preMute == null) { preMute = +vol.value; setVol(0); } else { setVol(preMute); preMute = null; } }
   else if (k === '/') { e.preventDefault(); showTab('search'); }
 });
@@ -806,7 +1023,7 @@ addEventListener('keydown', e => {
 /* ---------- boot ---------- */
 async function boot() {
   let s = {}; try { s = JSON.parse(localStorage.getItem('myoosick_pleyer.settings') || '{}'); } catch (e) {}
-  state.shuffle = !!s.shuffle; state.repeat = s.repeat || 'off';
+  state.shuffle = !!s.shuffle; state.repeat = s.repeat || 'off'; state.discover = !!s.discover;
   setVol(s.vol ?? 80); applyModes();
   try {
     JSON.parse(localStorage.getItem('myoosick_pleyer.queue') || '[]').forEach(o => state.queue.push(mkTrack(o)));
