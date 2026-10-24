@@ -37,7 +37,7 @@ public class PlayerService extends Service {
 
     /** What the page last told us. */
     static final class State {
-        String title = "", artist = "", repeat = "off";
+        String title = "", artist = "", repeat = "off", thumb = "";
         boolean playing, shuffle, disc;
         long pos, dur;
         int vol = 80;
@@ -60,6 +60,7 @@ public class PlayerService extends Service {
             State s = new State();
             s.title = o.optString("title", "");
             s.artist = o.optString("artist", "");
+            s.thumb = o.optString("thumb", "");
             s.playing = o.optBoolean("playing", false);
             s.pos = o.optLong("pos", 0);
             s.dur = o.optLong("dur", 0);
@@ -73,7 +74,7 @@ public class PlayerService extends Service {
             return;
         }
         PlayerService svc = instance;
-        if (svc != null) svc.main.post(svc::refresh);
+        if (svc != null) svc.scheduleRefresh();
     }
 
     @Override
@@ -148,18 +149,62 @@ public class PlayerService extends Service {
         return "one".equals(r) ? R.drawable.ic_repeat_one : "all".equals(r) ? R.drawable.ic_repeat_on : R.drawable.ic_repeat;
     }
 
-    /** Retro cassette artwork for the current song (cached until title / artist / play state change). */
+    private final Runnable refreshRun = this::refresh;
+    private void scheduleRefresh() {            // coalesce bursts of state changes into one notification update
+        main.removeCallbacks(refreshRun);
+        main.postDelayed(refreshRun, 80);
+    }
+
+    private final java.util.concurrent.ExecutorService io = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final java.util.HashMap<String, Bitmap> thumbs = new java.util.HashMap<>();   // url -> square art (main thread only)
+    private final java.util.HashSet<String> thumbPending = new java.util.HashSet<>();
+
+    /** Art for the current song: its thumbnail when we have it, otherwise the amber LCD card. */
     private Bitmap artFor(State s) {
-        String key = s.title + "\n" + s.artist + "\n" + s.playing;
+        String key = s.thumb + "\n" + s.title + "\n" + s.artist + "\n" + s.playing;
         if (!key.equals(artKey) || art == null) {
+            Bitmap b = s.thumb.isEmpty() ? null : thumbs.get(s.thumb);
+            if (b == null && !s.thumb.isEmpty()) fetchThumb(s.thumb);
             try {
-                art = RetroArt.render(this, s.title, s.artist, s.playing);
-                artKey = key;
+                if (b != null) { art = b; artKey = key; }
+                else {
+                    art = RetroArt.renderLcd(s.title, s.artist, s.playing);
+                    artKey = s.thumb.isEmpty() ? key : null;       // null: redo once the thumbnail arrives
+                }
             } catch (Throwable t) {
                 Log.w("Pleyer", "art failed", t);
             }
         }
         return art;
+    }
+
+    private void fetchThumb(final String url) {
+        if (!thumbPending.add(url)) return;
+        io.execute(() -> {
+            Bitmap out = null;
+            try {
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                c.setConnectTimeout(6000); c.setReadTimeout(8000);
+                try (java.io.InputStream in = c.getInputStream()) {
+                    android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+                    o.inSampleSize = 1;
+                    Bitmap raw = android.graphics.BitmapFactory.decodeStream(in, null, o);
+                    if (raw != null) { out = RetroArt.fromThumb(raw); raw.recycle(); }
+                }
+            } catch (Throwable t) {
+                Log.w("Pleyer", "thumb failed: " + t);
+            }
+            final Bitmap res = out;
+            main.post(() -> {
+                thumbPending.remove(url);
+                if (res != null) {
+                    if (thumbs.size() > 8) thumbs.clear();
+                    thumbs.put(url, res);
+                    artKey = "";
+                    if (url.equals(last.thumb)) refresh();
+                }
+            });
+        });
     }
 
     private Notification buildMedia(State s) {
@@ -281,6 +326,7 @@ public class PlayerService extends Service {
     @Override
     public void onDestroy() {
         instance = null;
+        main.removeCallbacks(refreshRun); io.shutdownNow();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (session != null) { session.setActive(false); session.release(); }
         nm.cancel(ID_MEDIA);

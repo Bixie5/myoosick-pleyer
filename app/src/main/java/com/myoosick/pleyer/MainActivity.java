@@ -110,7 +110,7 @@ public class MainActivity extends Activity {
 
             @Override
             public boolean onConsoleMessage(ConsoleMessage m) {
-                android.util.Log.d("PleyerWeb", m.message());
+                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) android.util.Log.w("PleyerWeb", m.message());
                 return true;
             }
         });

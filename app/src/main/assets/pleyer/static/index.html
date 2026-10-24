@@ -277,6 +277,16 @@ html.android .controls .btn.big{flex:1.6 1 0}
 html.android .mix{margin-top:10px; flex:none}
 html.android #toasts{top:52px; bottom:auto; left:10px; right:10px}
 html.android .toast{max-width:none}
+/* ---- android performance: cheaper painting, no full-screen overlays ---- */
+html.android body::after, html.android .lcd::before, html.android .panes::before{display:none}
+html.android *{text-shadow:none !important}
+html.android .btn{transition:none; touch-action:manipulation; box-shadow:0 4px 0 #7d745f, inset 0 1px 0 #fff}
+html.android .btn:hover{filter:none}
+html.android .btn.on.sel{box-shadow:0 1px 0 #8a5d00, inset 0 3px 6px rgba(0,0,0,.25)}
+html.android .reel, html.android .ts-reel{animation-timing-function:steps(24)}
+html.android .thumb{filter:none}
+html.android .toast{box-shadow:0 4px 8px rgba(0,0,0,.5)}
+html.android button, html.android .row, html.android .tab, html.android input{touch-action:manipulation}
 @media (max-height:660px){ html.android #viz{display:none} }
 @media (max-height:520px){ html.android .lcd, html.android .seekwrap, html.android .controls, html.android .mix{display:none} }  /* keyboard open */
 </style>
@@ -815,7 +825,11 @@ function showTab(name) {
 
 /* ---------- android: one display panel that doubles as queue / search / library / discover ---------- */
 const IS_ANDROID = document.documentElement.classList.contains('android');
-function renderQueue() { renderQueueList(); if (viewMode === 'disc') renderDisc(); }
+function renderQueue() {
+  if (IS_ANDROID && viewMode !== 'queue' && viewMode !== 'disc') { queueDirty = true; return; }   // rebuilt when opened
+  queueDirty = false; renderQueueList(); if (viewMode === 'disc') renderDisc();
+}
+let queueDirty = false;
 function setView(mode) {
   viewMode = mode;
   document.documentElement.dataset.view = mode === 'tape' ? 'tape' : 'pane';
@@ -858,30 +872,78 @@ if (IS_ANDROID) {
 /* ---------- online search ---------- */
 const webTrack = r => mkTrack({ title: r.title, artist: r.uploader, duration: r.duration, source: 'web', src: '/api/stream?u=' + encodeURIComponent(r.url), ref: r.url, thumb: r.thumbnail });
 
+function webRow(res) {
+  const dlBtn = h('button', { class: 'mini', title: 'Download to library' }, '⬇');
+  dlBtn.onclick = ev => { ev.stopPropagation(); startDownload(res, dlBtn); };
+  return h('div', { class: 'row res', onclick: () => addTracks([webTrack(res)], { play: true }) },
+    h('img', { class: 'thumb', src: res.thumbnail || '', alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }),
+    h('div', { class: 'info' }, h('div', { class: 't' }, res.title), h('div', { class: 's' }, res.uploader || '')),
+    h('div', { class: 'd' }, fmt(res.duration)),
+    h('div', { class: 'acts' },
+      h('button', { class: 'mini', title: 'Play now', onclick: ev => { ev.stopPropagation(); addTracks([webTrack(res)], { play: true }); } }, '▶'),
+      h('button', { class: 'mini', title: 'Add to queue', onclick: ev => { ev.stopPropagation(); addTracks([webTrack(res)]); toast('ADDED TO QUEUE'); } }, '+'),
+      dlBtn));
+}
+
+/* android: search the music folders added to the library (scans each folder once, then keeps the list) */
+async function localMatches(q) {
+  if (!IS_ANDROID || !window.AndroidBridge || /^https?:\/\//i.test(q)) return [];
+  try {
+    if (!folderState.list.length) {
+      const j = await (await fetch('/api/folders')).json(); folderState.list = j.folders || [];
+    }
+    await Promise.all(folderState.list.filter(f => !folderState.files.has(f.uri)).map(async f => {
+      try {
+        const r = await fetch('/api/folders/scan?u=' + encodeURIComponent(f.uri)), j = await r.json();
+        if (r.ok) folderState.files.set(f.uri, j.tracks);
+      } catch (e) {}
+    }));
+  } catch (e) { return []; }
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean), out = [];
+  for (const f of folderState.list) for (const t of (folderState.files.get(f.uri) || [])) {
+    const hay = ((t.path || '') + ' ' + t.name).toLowerCase();
+    if (words.every(w => hay.includes(w))) out.push(t);
+  }
+  return out;
+}
+function localRows(files) {
+  const rows = [h('div', { class: 'hint' }, `ON THIS PHONE (${files.length})`)];
+  files.slice(0, 50).forEach(t => {
+    const tr = folderTrack(t);
+    rows.push(h('div', { class: 'row', onclick: () => addTracks([folderTrack(t)], { play: true }) },
+      h('div', { class: 'idx' }, '♪'),
+      h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
+      h('div', { class: 'd' }, ''),
+      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))));
+  });
+  if (files.length > 50) rows.push(h('div', { class: 'hint' }, `+${files.length - 50} MORE. REFINE YOUR SEARCH.`));
+  return rows;
+}
+
+let searchSeq = 0;
 $('#searchForm').addEventListener('submit', async e => {
   e.preventDefault();
   const q = $('#q').value.trim(); if (!q) return;
-  const box = $('#results');
-  box.replaceChildren(h('div', { class: 'empty' }, 'SCANNING THE AIRWAVES...'));
+  const my = ++searchSeq, box = $('#results');
+  box.replaceChildren(h('div', { class: 'empty' }, IS_ANDROID && folderState.list.length ? 'SEARCHING YOUR FOLDERS...' : 'SCANNING THE AIRWAVES...'));
+  const online = fetch('/api/search?q=' + encodeURIComponent(q)).then(async r => {
+    const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j.results;
+  });
+  online.catch(() => {});                       // handled below; avoids an unhandled-rejection warning
+  const local = await localMatches(q);
+  if (my !== searchSeq) return;
+  const localEls = local.length ? localRows(local) : [];
+  box.replaceChildren(...localEls, h('div', { class: 'empty' }, 'SCANNING THE AIRWAVES...'));
   try {
-    const r = await fetch('/api/search?q=' + encodeURIComponent(q));
-    const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
-    box.replaceChildren();
-    if (!j.results.length) return box.append(h('div', { class: 'empty' }, 'NO SIGNAL. TRY ANOTHER SEARCH.'));
-    j.results.forEach(res => {
-      const dlBtn = h('button', { class: 'mini', title: 'Download to library' }, '⬇');
-      dlBtn.onclick = ev => { ev.stopPropagation(); startDownload(res, dlBtn); };
-      box.append(h('div', { class: 'row res', onclick: () => addTracks([webTrack(res)], { play: true }) },
-        h('img', { class: 'thumb', src: res.thumbnail || '', alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }),
-        h('div', { class: 'info' }, h('div', { class: 't' }, res.title), h('div', { class: 's' }, res.uploader || '')),
-        h('div', { class: 'd' }, fmt(res.duration)),
-        h('div', { class: 'acts' },
-          h('button', { class: 'mini', title: 'Play now', onclick: ev => { ev.stopPropagation(); addTracks([webTrack(res)], { play: true }); } }, '▶'),
-          h('button', { class: 'mini', title: 'Add to queue', onclick: ev => { ev.stopPropagation(); addTracks([webTrack(res)]); toast('ADDED TO QUEUE'); } }, '+'),
-          dlBtn)));
-    });
+    const results = await online;
+    if (my !== searchSeq) return;
+    box.replaceChildren(...localEls);
+    if (localEls.length && results.length) box.append(h('div', { class: 'hint' }, 'ONLINE'));
+    if (!results.length && !localEls.length) return box.append(h('div', { class: 'empty' }, 'NO SIGNAL. TRY ANOTHER SEARCH.'));
+    results.forEach(res => box.append(webRow(res)));
   } catch (err) {
-    box.replaceChildren(h('div', { class: 'empty err' }, 'ERROR: ' + err.message));
+    if (my !== searchSeq) return;
+    box.replaceChildren(...localEls, h('div', { class: 'empty err' }, 'ERROR: ' + err.message));
   }
 });
 
@@ -976,9 +1038,21 @@ addEventListener('resize', () => { fitCanvas(viz); fitCanvas(vu); updateNow(); }
 const BARS = 30, SEGS = 10, levels = new Float32Array(BARS), vuLvl = [0, 0];
 const C_ON = '#ffb000', C_HOT = '#ff7a1a', C_PEAK = '#ff3b2a', C_OFF = '#2d1e00';
 
-function draw() {
+let lastDraw = 0, idleDrawn = false;
+function draw(ts) {
   requestAnimationFrame(draw);
   const live = ctx && !audio.paused;
+  if (document.hidden) return;
+  if (IS_ANDROID) {                       // phones: ~30 fps is plenty, and nothing to redraw when silent
+    if (ts - lastDraw < 33) return;
+    lastDraw = ts;
+    if (!live) {
+      let quiet = vuLvl[0] <= 0.001 && vuLvl[1] <= 0.001;
+      for (let b = 0; quiet && b < BARS; b++) if (levels[b] > 0.001) quiet = false;
+      if (quiet && idleDrawn) return;
+      idleDrawn = quiet;
+    } else idleDrawn = false;
+  }
   if (live) analyser.getByteFrequencyData(freq);
   const g = viz.getContext('2d'), W = viz.width, H = viz.height, d = devicePixelRatio || 1;
   g.clearRect(0, 0, W, H);
@@ -1128,7 +1202,7 @@ function reportState() {
     const t = cur();
     try {
       AB.state(JSON.stringify({
-        title: t ? t.title : '', artist: t ? (t.artist || '') : '',
+        title: t ? t.title : '', artist: t ? (t.artist || '') : '', thumb: t && /^https?:/.test(t.thumb || '') ? t.thumb : '',
         playing: !audio.paused, pos: Math.round((audio.currentTime || 0) * 1000), dur: Math.round((trackDur() || 0) * 1000),
         shuffle: state.shuffle, repeat: state.repeat, disc: state.discover, vol: +vol.value
       }));
