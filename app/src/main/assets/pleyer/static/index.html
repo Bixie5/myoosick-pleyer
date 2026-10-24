@@ -430,12 +430,14 @@ PASTE A LINK TO LOAD A VIDEO OR PLAYLIST.</div></div>
         <div class="pane" id="pane-library">
           <div class="bar">
             <button class="btn sm" id="btnAddAll">+ ADD ALL</button>
+            <button class="btn sm" id="btnRecent" style="display:none">RECENT</button>
             <button class="btn sm" id="btnRefresh">REFRESH</button>
           </div>
           <div class="list">
-            <div id="foldersBox" style="display:none"><div class="section">FOLDERS</div><div id="folders"></div></div>
+            <div id="foldersBox" style="display:none"><div class="section" id="foldHead">FOLDERS</div><div id="folders"></div></div>
+            <div id="recentBox" style="display:none"></div>
             <div id="downloads"></div>
-            <div class="section">SAVED TAPES</div>
+            <div class="section" id="savedHead">SAVED TAPES</div>
             <div id="library"></div>
           </div>
         </div>
@@ -469,7 +471,7 @@ PASTE A LINK TO LOAD A VIDEO OR PLAYLIST.</div></div>
 const $ = s => document.querySelector(s);
 const audio = $('#audio');
 const AUDIO_RE = /\.(mp3|flac|ogg|oga|opus|wav|m4a|aac|wma|webm|mka)$/i;
-const state = { queue: [], index: -1, shuffle: false, repeat: 'off', discover: false, pool: [], seen: new Set(), history: [], hops: 0, dl: new Map(), library: [] };
+const state = { queue: [], index: -1, shuffle: false, repeat: 'off', discover: false, pool: [], seen: new Set(), history: [], hops: 0, dl: new Map(), library: [], dir: null };
 let loadedUid = null, uid = 0, dragging = false, preMute = null, viewMode = 'tape';
 
 /* ---------- tiny helpers ---------- */
@@ -507,7 +509,7 @@ function addTracks(list, { play = false } = {}) {
   if (!list.length) return;
   const start = state.queue.length;
   state.queue.push(...list);
-  if (play) playIndex(start);
+  if (play) { state.dir = null; playIndex(start); }
   else if (state.index < 0) { state.index = 0; updateNow(); }
   renderQueue(); saveQueue();
 }
@@ -542,7 +544,7 @@ function removeAt(i) {
 }
 function clearQueue() {
   state.queue.forEach(t => t.source === 'local' && URL.revokeObjectURL(t.src));
-  state.queue = []; state.index = -1; loadedUid = null;
+  state.queue = []; state.index = -1; loadedUid = null; state.dir = null;
   audio.pause(); audio.removeAttribute('src'); audio.load();
   updateNow(); renderQueue(); saveQueue();
 }
@@ -582,7 +584,37 @@ function stop() {
   audio.pause(); try { audio.currentTime = 0; } catch (e) {}
   setStatus('STOP'); updateTime(); renderQueue();
 }
+/* ---- folder playback: songs are played straight from a folder's file list, NOT added to the queue.
+   Only the song that is playing sits in the queue (flagged .dir); songs you add by hand stay queued. ---- */
+function dirPlace(k) {                       // make file k the playing folder song; returns its queue index
+  const d = state.dir; d.i = k;
+  const tr = folderTrack(d.files[k]); tr.dir = true;
+  const p = state.queue.findIndex(t => t.dir);
+  if (p >= 0) { state.queue.splice(p, 1); if (p <= state.index) state.index--; }
+  const at = Math.max(0, Math.min(state.queue.length, state.index + 1));
+  state.queue.splice(at, 0, tr);
+  return at;
+}
+function dirNextK(auto) {                    // which file comes next (in order, or shuffled), -1 = end
+  const d = state.dir, n = d.files.length; if (!n) return -1;
+  if (state.shuffle && n > 1) {
+    const fresh = () => { const a = Array.from({ length: n }, (_, i) => i); for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    if (!d.perm) { d.perm = fresh(); d.perm.splice(d.perm.indexOf(d.i), 1); d.perm.unshift(d.i); d.p = 0; }
+    if (d.p + 1 >= n) { if (auto && state.repeat !== 'all') return -1; d.perm = fresh(); d.p = 0; return d.perm[0]; }
+    return d.perm[++d.p];
+  }
+  const k = d.i + 1;
+  if (k >= n) return (state.repeat === 'all' || !auto) ? 0 : -1;
+  return k;
+}
 function nextIndex(auto) {
+  if (state.dir && !state.discover) {
+    if (state.repeat === 'one' && auto && state.queue.length) return state.index;
+    if (state.index + 1 < state.queue.length) return state.index + 1;      // songs you queued by hand play first
+    const k = dirNextK(auto); if (k < 0) return -1;
+    state.dir.hist.push(state.dir.i);
+    return dirPlace(k);
+  }
   const n = state.queue.length; if (!n) return -1;
   if (state.repeat === 'one' && auto) return state.index;
   if (state.discover) { const j = state.index + 1; return j < n ? j : -1; }  // radio plays in order
@@ -597,6 +629,12 @@ async function next() {
 }
 function prev() {
   if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+  if (state.dir && !state.discover && state.queue[state.index] && state.queue[state.index].dir) {
+    const d = state.dir; let k = d.hist.length ? d.hist.pop() : (d.i > 0 ? d.i - 1 : -1);
+    if (k < 0) { audio.currentTime = 0; return; }
+    if (d.perm && d.perm[d.p - 1] === k) d.p--;
+    return playIndex(dirPlace(k));
+  }
   const n = state.queue.length; if (!n) return;
   playIndex(state.index <= 0 ? n - 1 : state.index - 1);
 }
@@ -705,7 +743,7 @@ function applyModes() {
   reportState();
   $('#fRep').textContent = state.repeat === 'one' ? 'REP1' : 'REP';
 }
-function toggleShuffle() { state.shuffle = !state.shuffle; applyModes(); saveSettings(); }
+function toggleShuffle() { state.shuffle = !state.shuffle; if (state.dir) state.dir.perm = null; applyModes(); saveSettings(); }
 function cycleRepeat() { state.repeat = { off: 'all', all: 'one', one: 'off' }[state.repeat]; applyModes(); saveSettings(); }
 $('#btnShuf').onclick = toggleShuffle; $('#btnRep').onclick = cycleRepeat;
 
@@ -886,31 +924,32 @@ function webRow(res) {
 }
 
 /* android: search the music folders added to the library (scans each folder once, then keeps the list) */
+async function scanAllFolders() {
+  if (!folderState.list.length) {
+    const j = await (await fetch('/api/folders')).json(); folderState.list = j.folders || [];
+  }
+  await Promise.all(folderState.list.filter(f => !folderState.files.has(f.uri)).map(async f => {
+    try {
+      const r = await fetch('/api/folders/scan?u=' + encodeURIComponent(f.uri)), j = await r.json();
+      if (r.ok) folderState.files.set(f.uri, j.tracks);
+    } catch (e) {}
+  }));
+}
 async function localMatches(q) {
   if (!IS_ANDROID || !window.AndroidBridge || /^https?:\/\//i.test(q)) return [];
-  try {
-    if (!folderState.list.length) {
-      const j = await (await fetch('/api/folders')).json(); folderState.list = j.folders || [];
-    }
-    await Promise.all(folderState.list.filter(f => !folderState.files.has(f.uri)).map(async f => {
-      try {
-        const r = await fetch('/api/folders/scan?u=' + encodeURIComponent(f.uri)), j = await r.json();
-        if (r.ok) folderState.files.set(f.uri, j.tracks);
-      } catch (e) {}
-    }));
-  } catch (e) { return []; }
+  try { await scanAllFolders(); } catch (e) { return []; }
   const words = q.toLowerCase().split(/\s+/).filter(Boolean), out = [];
-  for (const f of folderState.list) for (const t of (folderState.files.get(f.uri) || [])) {
+  for (const f of folderState.list) { const all = folderState.files.get(f.uri) || []; for (const t of all) {
     const hay = ((t.path || '') + ' ' + t.name).toLowerCase();
-    if (words.every(w => hay.includes(w))) out.push(t);
-  }
+    if (words.every(w => hay.includes(w))) out.push({ t, all, name: f.name });
+  } }
   return out;
 }
 function localRows(files) {
   const rows = [h('div', { class: 'hint' }, `ON THIS PHONE (${files.length})`)];
-  files.slice(0, 50).forEach(t => {
+  files.slice(0, 50).forEach(({ t, all, name }) => {
     const tr = folderTrack(t);
-    rows.push(h('div', { class: 'row', onclick: () => addTracks([folderTrack(t)], { play: true }) },
+    rows.push(h('div', { class: 'row', onclick: () => playFolderFrom(all, all.indexOf(t), name) },
       h('div', { class: 'idx' }, '♪'),
       h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
       h('div', { class: 'd' }, ''),
@@ -999,7 +1038,7 @@ async function loadLibrary() {
 }
 function renderLibrary() {
   const box = $('#library'); box.replaceChildren();
-  if (!state.library.length) return box.append(h('div', { class: 'empty' }, 'NOTHING SAVED YET.\nUSE ⬇ IN SEARCH TO RECORD A TAPE.'));
+  if (!state.library.length) return IS_ANDROID ? undefined : box.append(h('div', { class: 'empty' }, 'NOTHING SAVED YET.\nUSE ⬇ IN SEARCH TO RECORD A TAPE.'));
   state.library.forEach(f => box.append(h('div', { class: 'row', onclick: () => addTracks([diskTrack(f)], { play: true }) },
     h('div', { class: 'idx' }, '♪'),
     h('div', { class: 'info' }, h('div', { class: 't' }, stem(f.name)), h('div', { class: 's' }, fmtSize(f.size) + ' · ' + f.name.split('.').pop().toUpperCase())),
@@ -1132,15 +1171,17 @@ async function openFolder(f) {
   renderFolders();
 }
 function folderTrack(t) {
+  if (t.disk) return diskTrack(t.f);
   const base = stem(t.name), m = base.match(/^(.+?)\s+-\s+(.+)$/);
   return mkTrack({ title: m ? m[2] : base, artist: m ? m[1] : (t.path || ''), source: 'folder',
     src: '/saf/file?u=' + encodeURIComponent(t.uri) + '&n=' + encodeURIComponent(t.name), ref: t.uri });
 }
-function playFolderFrom(files, i, name) {   // replace the queue with the folder and start at track i
-  clearQueue();
-  addTracks(files.map(folderTrack));
-  playIndex(i);
-  toast(`PLAYING ${name} (${files.length} TRACKS)`);
+function playFolderFrom(files, i, name, random) {   // play straight from the folder (in order / shuffled); the queue is untouched
+  if (!files.length) return;
+  if (random && state.shuffle) i = Math.floor(Math.random() * files.length);
+  state.dir = { files, name, i, hist: [], perm: null, p: 0 };
+  playIndex(dirPlace(i));
+  toast(`PLAYING ${name}` + (state.shuffle ? ' (SHUFFLE)' : ''));
 }
 function renderFolders() {
   const box = $('#folders'); if (!box) return; box.replaceChildren();
@@ -1161,7 +1202,7 @@ function renderFolders() {
     if (!isOpen || !files) return;
     if (!files.length) return box.append(h('div', { class: 'hint' }, 'NO AUDIO FILES IN THIS FOLDER.'));
     box.append(h('div', { class: 'bar' },
-      h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, f.name) }, '▶ PLAY ALL'),
+      h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, f.name, true) }, '▶ PLAY ALL'),
       h('button', { class: 'btn sm', onclick: () => { addTracks(files.map(folderTrack)); toast(`ADDED ${files.length} TRACKS`); } }, '+ ADD ALL')));
     files.slice(0, folderState.shown).forEach((t, i) => {
       const tr = folderTrack(t);
@@ -1175,14 +1216,44 @@ function renderFolders() {
       h('div', { class: 'idx' }, '…'), h('div', { class: 'info' }, h('div', { class: 't' }, `SHOW MORE (${files.length - folderState.shown} LEFT)`)), h('div', { class: 'd' }, ''), h('div', { class: 'acts' })));
   });
 }
+/* android library: RECENT = the 100 most recently added songs (folders + saved downloads) */
+async function showRecent(on) {
+  folderState.recentOn = on;
+  $('#btnRecent').classList.toggle('sel', on);
+  $('#recentBox').style.display = on ? 'block' : 'none';
+  $('#foldersBox').style.display = on ? 'none' : 'block';
+  $('#downloads').style.display = on ? 'none' : ''; $('#library').style.display = on ? 'none' : '';
+  if (!on) return;
+  const box = $('#recentBox'); box.replaceChildren(h('div', { class: 'empty' }, 'LOOKING FOR NEW SONGS...'));
+  try { await scanAllFolders(); await loadLibrary(); } catch (e) {}
+  if (!folderState.recentOn) return;
+  const all = [];
+  for (const f of folderState.list) for (const t of (folderState.files.get(f.uri) || [])) all.push({ t, mod: t.mod || 0 });
+  for (const f of state.library) all.push({ t: { disk: true, f, name: f.name, path: 'SAVED' }, mod: (f.mtime || 0) * 1000 });
+  all.sort((a, b) => b.mod - a.mod);
+  const top = all.slice(0, 100), files = top.map(x => x.t);
+  box.replaceChildren();
+  if (!files.length) return box.append(h('div', { class: 'empty' }, 'NOTHING YET.'));
+  box.append(h('div', { class: 'bar' }, h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, 'RECENT', true) }, '▶ PLAY ALL')));
+  files.forEach((t, i) => {
+    const tr = folderTrack(t);
+    box.append(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, 'RECENT') },
+      h('div', { class: 'idx' }, String(i + 1)),
+      h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
+      h('div', { class: 'd' }, ''),
+      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))));
+  });
+}
 function setupAndroidFolders() {
   if (!IS_ANDROID) return;
   const bar = $('#pane-library .bar');                       // +FILES / +FOLDER move here from QUEUE
-  bar.prepend($('#btnFolder')); bar.prepend($('#btnFiles'));
-  $('#btnAddAll').textContent = '+ SAVED';
+  bar.prepend($('#btnFolder'));
+  $('#foldHead').remove(); $('#btnFiles').remove(); $('#btnAddAll').remove(); $('#savedHead').remove();        // not needed on the phone
+  const rb = $('#btnRecent'); rb.style.display = '';
+  rb.onclick = () => showRecent(!folderState.recentOn);
   if (!(window.AndroidBridge && window.AndroidBridge.pickFolder)) return;
   $('#btnFolder').onclick = () => window.AndroidBridge.pickFolder();
-  $('#btnRefresh').addEventListener('click', () => loadFolders(true));
+  $('#btnRefresh').addEventListener('click', () => { loadFolders(true); if (folderState.recentOn) showRecent(true); });
   $('#foldersBox').style.display = 'block';
   window.onFoldersChanged = async () => {
     await loadFolders(true);

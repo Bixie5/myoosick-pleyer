@@ -124,13 +124,15 @@ public final class FolderStore {
                 DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                 DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_SIZE};
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED};
         List<String[]> dirs = new ArrayList<>();
         try (Cursor c = cr.query(children, proj, null, null, null)) {
             if (c == null) return;
             while (c.moveToNext()) {
                 String id = c.getString(0), name = c.getString(1), mime = c.getString(2);
                 long size = c.isNull(3) ? 0 : c.getLong(3);
+                long mod = c.isNull(4) ? 0 : c.getLong(4);
                 if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
                     dirs.add(new String[]{id, name});
                 } else if (isAudio(name, mime) && out.length() < MAX_FILES) {
@@ -139,6 +141,7 @@ public final class FolderStore {
                                 .put("name", name)
                                 .put("path", path)
                                 .put("size", size)
+                                .put("mod", mod)
                                 .put("uri", DocumentsContract.buildDocumentUriUsingTree(tree, id).toString()));
                     } catch (JSONException ignored) {
                     }
