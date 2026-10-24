@@ -95,7 +95,7 @@ public class PlayerService extends Service {
             @Override public void onSkipToNext() { MainActivity.sendCommand("next"); }
             @Override public void onSkipToPrevious() { MainActivity.sendCommand("prev"); }
             @Override public void onSeekTo(long pos) { MainActivity.sendCommand("seek:" + pos); }
-            @Override public void onCustomAction(String action, Bundle extras) { MainActivity.sendCommand(action); }
+            @Override public void onCustomAction(String action, Bundle extras) { if ("close".equals(action)) shutdownEverything(); else MainActivity.sendCommand(action); }
         });
         session.setActive(true);
 
@@ -123,6 +123,10 @@ public class PlayerService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         // Notification buttons arrive here as "com.myoosick.pleyer.cmd.<name>"
+        if (intent != null && (ACTION_PREFIX + "close").equals(intent.getAction())) {
+            shutdownEverything();                  // the corner X on the notification: stop and close the app
+            return START_NOT_STICKY;
+        }
         if (intent != null && intent.getAction() != null && intent.getAction().startsWith(ACTION_PREFIX)) {
             MainActivity.sendCommand(intent.getAction().substring(ACTION_PREFIX.length()));
         }
@@ -159,21 +163,14 @@ public class PlayerService extends Service {
     private final java.util.HashMap<String, Bitmap> thumbs = new java.util.HashMap<>();   // url -> square art (main thread only)
     private final java.util.HashSet<String> thumbPending = new java.util.HashSet<>();
 
-    /** Art for the current song: its thumbnail when we have it, otherwise the amber LCD card. */
+    /** Art for the current song: its thumbnail when we have one, otherwise nothing (default blank look). */
     private Bitmap artFor(State s) {
         String key = s.thumb + "\n" + s.title + "\n" + s.artist + "\n" + s.playing;
-        if (!key.equals(artKey) || art == null) {
+        if (!key.equals(artKey)) {
             Bitmap b = s.thumb.isEmpty() ? null : thumbs.get(s.thumb);
             if (b == null && !s.thumb.isEmpty()) fetchThumb(s.thumb);
-            try {
-                if (b != null) { art = b; artKey = key; }
-                else {
-                    art = RetroArt.renderLcd(s.title, s.artist, s.playing);
-                    artKey = s.thumb.isEmpty() ? key : null;       // null: redo once the thumbnail arrives
-                }
-            } catch (Throwable t) {
-                Log.w("Pleyer", "art failed", t);
-            }
+            art = b;                      // null = no thumbnail yet / none: the system's plain default look
+            artKey = (b != null || s.thumb.isEmpty()) ? key : null;   // null: redo once the thumbnail arrives
         }
         return art;
     }
@@ -228,7 +225,7 @@ public class PlayerService extends Service {
                 .addAction(s.playing ? act(R.drawable.ic_pause, "Pause", "pause", 12)
                                      : act(R.drawable.ic_play, "Play", "play", 12))
                 .addAction(act(R.drawable.ic_next, "Next", "next", 13))
-                .addAction(act(repeatIcon(s.repeat), "Repeat", "repeat", 14))
+                .addAction(act(R.drawable.ic_close, "Close", "close", 14))
                 .setStyle(style);
         Bitmap a = artFor(s);
         if (a != null) nb.setLargeIcon(a);
@@ -290,7 +287,7 @@ public class PlayerService extends Service {
                         s.pos, s.playing ? 1f : 0f, SystemClock.elapsedRealtime())
                 // Android 13+ lockscreen/shade player shows these in its spare slots
                 .addCustomAction("shuffle", "Shuffle", s.shuffle ? R.drawable.ic_shuffle_on : R.drawable.ic_shuffle)
-                .addCustomAction("repeat", "Repeat", repeatIcon(s.repeat))
+                .addCustomAction("close", "Close", R.drawable.ic_close)
                 .addCustomAction("disc", "Radio", s.disc ? R.drawable.ic_disc_on : R.drawable.ic_disc)
                 .addCustomAction("voldown", "Volume down", R.drawable.ic_vol_down)
                 .addCustomAction("volup", "Volume up", R.drawable.ic_vol_up);
