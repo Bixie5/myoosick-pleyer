@@ -430,7 +430,6 @@ PASTE A LINK TO LOAD A VIDEO OR PLAYLIST.</div></div>
         <div class="pane" id="pane-library">
           <div class="bar">
             <button class="btn sm" id="btnAddAll">+ ADD ALL</button>
-            <button class="btn sm" id="btnRecent" style="display:none">RECENT</button>
             <button class="btn sm" id="btnRefresh">REFRESH</button>
           </div>
           <div class="list">
@@ -561,7 +560,7 @@ function saveSettings() {
 /* ---------- playback ---------- */
 function load(i) {
   const t = state.queue[i]; if (!t) return;
-  state.index = i; loadedUid = t.uid; audio.src = t.src;
+  state.index = i; loadedUid = t.uid; countedFor = null; audio.src = t.src;
   updateNow(); renderQueue();
 }
 async function playIndex(i) { load(i); await play(); }
@@ -1146,6 +1145,39 @@ addEventListener('keydown', e => {
   else if (k === '/') { e.preventDefault(); showTab('search'); }
 });
 
+/* ---------- play statistics: MOST PLAYED (top 100, needs 2+ plays) and RECENTLY PLAYED (last 100) ----------
+   A song counts as played once it has actually played for ~5 seconds. Everything is kept on the phone. */
+const STATS_KEY = 'myoosick_pleyer.stats', LIST_MAX = 100;
+let stats = { n: {}, mp: [], rp: [], meta: {} }, countedFor = null, statsTimer = null;
+try { const j = JSON.parse(localStorage.getItem(STATS_KEY) || 'null'); if (j && j.n) stats = j; } catch (e) {}
+function saveStats() {
+  clearTimeout(statsTimer);
+  statsTimer = setTimeout(() => { try { localStorage.setItem(STATS_KEY, JSON.stringify(stats)); } catch (e) {} }, 1500);
+}
+const statKey = t => t.source + ':' + (t.ref || t.src);
+function recordPlay(t, S = stats) {
+  const k = statKey(t);
+  S.meta[k] = { source: t.source, title: t.title, artist: t.artist || '', src: t.src, ref: t.ref, thumb: t.thumb || null, duration: t.duration || null };
+  const n = S.n[k] = (S.n[k] || 0) + 1;
+  // recently played: newest first, no duplicates, 100 max
+  S.rp = [k, ...S.rp.filter(x => x !== k)].slice(0, LIST_MAX);
+  // most played: needs 2+ plays; a newcomer must beat (strictly) the bottom song once the list is full
+  if (S.mp.includes(k)) { /* already listed: just re-rank below */ }
+  else if (n >= 2) {
+    if (S.mp.length < LIST_MAX) S.mp.push(k);
+    else if (n > S.n[S.mp[S.mp.length - 1]]) S.mp[S.mp.length - 1] = k;
+  }
+  S.mp.sort((a, b) => S.n[b] - S.n[a]);                 // stable: equal counts keep their order
+  const keep = new Set([...S.rp, ...S.mp]);
+  for (const m of Object.keys(S.meta)) if (!keep.has(m)) delete S.meta[m];
+  return S;
+}
+function maybeCount() {
+  const t = cur(); if (!t || t.source === 'local' || countedFor === t.uid) return;
+  if (audio.currentTime >= Math.min(5, (trackDur() || 10) / 2)) { countedFor = t.uid; recordPlay(t); saveStats(); }
+}
+audio.addEventListener('timeupdate', maybeCount);
+
 /* ---------- android: real music folders in the library ----------
    "+ FOLDER" opens Android's folder picker (the app remembers the folder). Tracks in a folder are
    read by the on-phone server (/saf/file), so seeking, queueing and the visualizer all work. */
@@ -1171,6 +1203,7 @@ async function openFolder(f) {
   renderFolders();
 }
 function folderTrack(t) {
+  if (t.trk) return mkTrack({ ...t.trk });
   if (t.disk) return diskTrack(t.f);
   const base = stem(t.name), m = base.match(/^(.+?)\s+-\s+(.+)$/);
   return mkTrack({ title: m ? m[2] : base, artist: m ? m[1] : (t.path || ''), source: 'folder',
@@ -1216,31 +1249,40 @@ function renderFolders() {
       h('div', { class: 'idx' }, '…'), h('div', { class: 'info' }, h('div', { class: 't' }, `SHOW MORE (${files.length - folderState.shown} LEFT)`)), h('div', { class: 'd' }, ''), h('div', { class: 'acts' })));
   });
 }
-/* android library: RECENT = the 100 most recently added songs (folders + saved downloads) */
-async function showRecent(on) {
-  folderState.recentOn = on;
-  $('#btnRecent').classList.toggle('sel', on);
-  $('#recentBox').style.display = on ? 'block' : 'none';
-  $('#foldersBox').style.display = on ? 'none' : 'block';
-  $('#downloads').style.display = on ? 'none' : ''; $('#library').style.display = on ? 'none' : '';
-  if (!on) return;
-  const box = $('#recentBox'); box.replaceChildren(h('div', { class: 'empty' }, 'LOOKING FOR NEW SONGS...'));
-  try { await scanAllFolders(); await loadLibrary(); } catch (e) {}
-  if (!folderState.recentOn) return;
-  const all = [];
-  for (const f of folderState.list) for (const t of (folderState.files.get(f.uri) || [])) all.push({ t, mod: t.mod || 0 });
-  for (const f of state.library) all.push({ t: { disk: true, f, name: f.name, path: 'SAVED' }, mod: (f.mtime || 0) * 1000 });
-  all.sort((a, b) => b.mod - a.mod);
-  const top = all.slice(0, 100), files = top.map(x => x.t);
+/* android library: lists shown in place of the folders - ADDED (100 newest files), PLAYED (last 100 played), MOST (top 100 by plays) */
+const LISTS = { added: 'ADDED', played: 'PLAYED', most: 'MOST PLAYED' };
+async function showLibList(kind) {
+  if (folderState.listOn === kind) kind = null;            // tapping the active button closes it
+  folderState.listOn = kind;
+  for (const k in LISTS) $('#lb_' + k).classList.toggle('sel', k === kind);
+  $('#recentBox').style.display = kind ? 'block' : 'none';
+  $('#foldersBox').style.display = kind ? 'none' : 'block';
+  $('#downloads').style.display = kind ? 'none' : ''; $('#library').style.display = kind ? 'none' : '';
+  if (!kind) return;
+  const box = $('#recentBox'); box.replaceChildren(h('div', { class: 'empty' }, 'LOADING...'));
+  let files = [], hint = '';
+  if (kind === 'added') {
+    try { await scanAllFolders(); await loadLibrary(); } catch (e) {}
+    const all = [];
+    for (const f of folderState.list) for (const t of (folderState.files.get(f.uri) || [])) all.push({ t, mod: t.mod || 0 });
+    for (const f of state.library) all.push({ t: { disk: true, f, name: f.name, path: 'SAVED' }, mod: (f.mtime || 0) * 1000 });
+    all.sort((a, b) => b.mod - a.mod);
+    files = all.slice(0, LIST_MAX).map(x => x.t);
+  } else {
+    const keys = kind === 'played' ? stats.rp : stats.mp;
+    files = keys.filter(k => stats.meta[k]).map(k => ({ trk: stats.meta[k], plays: stats.n[k] || 0 }));
+    hint = kind === 'most' ? 'PLAY A SONG 2 TIMES TO MAKE THIS LIST.' : 'SONGS YOU PLAY SHOW UP HERE.';
+  }
+  if (folderState.listOn !== kind) return;
   box.replaceChildren();
-  if (!files.length) return box.append(h('div', { class: 'empty' }, 'NOTHING YET.'));
-  box.append(h('div', { class: 'bar' }, h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, 'RECENT', true) }, '▶ PLAY ALL')));
+  if (!files.length) return box.append(h('div', { class: 'empty' }, hint || 'NOTHING YET.'));
+  box.append(h('div', { class: 'bar' }, h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, LISTS[kind], true) }, '▶ PLAY ALL')));
   files.forEach((t, i) => {
     const tr = folderTrack(t);
-    box.append(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, 'RECENT') },
+    box.append(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, LISTS[kind]) },
       h('div', { class: 'idx' }, String(i + 1)),
       h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
-      h('div', { class: 'd' }, ''),
+      h('div', { class: 'd' }, kind === 'most' ? t.plays + 'x' : ''),
       h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))));
   });
 }
@@ -1249,11 +1291,12 @@ function setupAndroidFolders() {
   const bar = $('#pane-library .bar');                       // +FILES / +FOLDER move here from QUEUE
   bar.prepend($('#btnFolder'));
   $('#foldHead').remove(); $('#btnFiles').remove(); $('#btnAddAll').remove(); $('#savedHead').remove();        // not needed on the phone
-  const rb = $('#btnRecent'); rb.style.display = '';
-  rb.onclick = () => showRecent(!folderState.recentOn);
+  const vb = h('div', { class: 'bar' });
+  for (const k in LISTS) vb.append(h('button', { class: 'btn sm', id: 'lb_' + k, onclick: () => showLibList(k) }, LISTS[k]));
+  bar.after(vb);
   if (!(window.AndroidBridge && window.AndroidBridge.pickFolder)) return;
   $('#btnFolder').onclick = () => window.AndroidBridge.pickFolder();
-  $('#btnRefresh').addEventListener('click', () => { loadFolders(true); if (folderState.recentOn) showRecent(true); });
+  $('#btnRefresh').addEventListener('click', () => { loadFolders(true); if (folderState.listOn) { const k = folderState.listOn; folderState.listOn = null; showLibList(k); } });
   $('#foldersBox').style.display = 'block';
   window.onFoldersChanged = async () => {
     await loadFolders(true);
