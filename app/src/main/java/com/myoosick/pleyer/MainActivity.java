@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.ConsoleMessage;
+import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -27,11 +28,29 @@ public class MainActivity extends Activity {
     private TextView splash;
     private ValueCallback<Uri[]> chooserCallback;
 
+    /** The live WebView, so the service (lockscreen / notification buttons) can talk to the page. */
+    private static volatile WebView webRef;
+
+    /** Run a player command in the page: play, pause, next, prev, shuffle, repeat, disc, volup, voldown, seek:<ms>. */
+    static void sendCommand(String cmd) {
+        final WebView w = webRef;
+        if (w == null || !cmd.matches("[a-z]+(:\\d+)?")) return;
+        w.post(() -> w.evaluateJavascript("window.__cmd && window.__cmd('" + cmd + "')", null));
+    }
+
+    /** Page -> app: the page reports what is playing so the notification can show it. */
+    private static final class JsBridge {
+        @JavascriptInterface
+        public void state(String json) { PlayerService.update(json); }
+    }
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         setContentView(R.layout.activity_main);
         web = findViewById(R.id.web);
+        webRef = web;
+        web.addJavascriptInterface(new JsBridge(), "AndroidBridge");
         splash = findViewById(R.id.splash);
 
         WebSettings s = web.getSettings();
@@ -124,6 +143,12 @@ public class MainActivity extends Activity {
         }
         if (chooserCallback != null) chooserCallback.onReceiveValue(result);
         chooserCallback = null;
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (webRef == web) webRef = null;
+        super.onDestroy();
     }
 
     // NOTE: onPause() is intentionally NOT forwarded to the WebView, so audio keeps playing

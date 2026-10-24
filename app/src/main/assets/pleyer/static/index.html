@@ -664,7 +664,7 @@ function updateNow() {
   $('#labelSub').textContent = t ? trunc(t.artist || 'SIDE A', 30) : 'SIDE A';
   $('#stripTitle').textContent = trunc(title.toUpperCase(), 40);
   document.title = t ? `${audio.paused ? '' : '▶ '}${t.title} — MYOOSICK PLEYER` : 'MYOOSICK PLEYER';
-  updateTime(); updateMediaMeta();
+  updateTime(); updateMediaMeta(); reportState();
 }
 
 /* ---------- media session ---------- */
@@ -691,6 +691,7 @@ function applyModes() {
   $('#btnRep').textContent = state.repeat === 'one' ? 'REP 1' : 'REP';
   $('#btnDisc').classList.toggle('on', state.discover); $('#fDisc').classList.toggle('on', state.discover);
   $('#modeDisc').classList.toggle('on', state.discover); if (viewMode === 'disc') renderDisc();
+  reportState();
   $('#fRep').textContent = state.repeat === 'one' ? 'REP1' : 'REP';
 }
 function toggleShuffle() { state.shuffle = !state.shuffle; applyModes(); saveSettings(); }
@@ -758,7 +759,7 @@ seek.addEventListener('input', () => { dragging = true; fillRange(seek); $('#cur
 seek.addEventListener('change', () => { const d = trackDur(); if (d) audio.currentTime = seek.value / 1000 * d; dragging = false; });
 
 const vol = $('#vol');
-function setVol(v) { v = Math.max(0, Math.min(100, v)); vol.value = v; audio.volume = v / 100; $('#volNum').textContent = v; fillRange(vol); saveSettings(); }
+function setVol(v) { v = Math.max(0, Math.min(100, v)); vol.value = v; audio.volume = v / 100; $('#volNum').textContent = v; fillRange(vol); saveSettings(); reportState(); }
 vol.addEventListener('input', () => setVol(+vol.value));
 
 /* ---------- adding local files ---------- */
@@ -1030,6 +1031,38 @@ addEventListener('keydown', e => {
   else if (k === 'm' || k === 'M') { if (preMute == null) { preMute = +vol.value; setVol(0); } else { setVol(preMute); preMute = null; } }
   else if (k === '/') { e.preventDefault(); showTab('search'); }
 });
+
+/* ---------- android app: lockscreen / notification controls ----------
+   The app (AndroidBridge) shows a media card + quick-controls card. We tell it what is playing,
+   and it sends button presses back through window.__cmd(). */
+let reportTimer = null;
+function reportState() {
+  const AB = window.AndroidBridge; if (!AB) return;
+  clearTimeout(reportTimer);
+  reportTimer = setTimeout(() => {
+    const t = cur();
+    try {
+      AB.state(JSON.stringify({
+        title: t ? t.title : '', artist: t ? (t.artist || '') : '',
+        playing: !audio.paused, pos: Math.round((audio.currentTime || 0) * 1000), dur: Math.round((trackDur() || 0) * 1000),
+        shuffle: state.shuffle, repeat: state.repeat, disc: state.discover, vol: +vol.value
+      }));
+    } catch (e) {}
+  }, 120);
+}
+['play', 'pause', 'seeked', 'loadedmetadata', 'durationchange'].forEach(ev => audio.addEventListener(ev, reportState));
+window.__cmd = c => {
+  if (c === 'play') play();
+  else if (c === 'pause') audio.pause();
+  else if (c === 'next') next();
+  else if (c === 'prev') prev();
+  else if (c === 'shuffle') toggleShuffle();
+  else if (c === 'repeat') cycleRepeat();
+  else if (c === 'disc') toggleDiscover();
+  else if (c === 'volup') setVol(+vol.value + 10);
+  else if (c === 'voldown') setVol(+vol.value - 10);
+  else if (c.startsWith('seek:')) { const ms = +c.slice(5); if (isFinite(ms)) audio.currentTime = ms / 1000; }
+};
 
 /* ---------- boot ---------- */
 async function boot() {
