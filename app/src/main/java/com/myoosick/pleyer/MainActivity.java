@@ -2,6 +2,7 @@ package com.myoosick.pleyer;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Intent;
 import android.net.Uri;
@@ -10,6 +11,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsResult;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -23,6 +25,9 @@ import java.net.URL;
 public class MainActivity extends Activity {
     private static final int REQ_FILES = 1001;
     private static final int REQ_NOTIF = 1002;
+    private static final int REQ_FOLDER = 1003;
+
+    private static volatile MainActivity instance;
 
     private WebView web;
     private TextView splash;
@@ -42,6 +47,13 @@ public class MainActivity extends Activity {
     private static final class JsBridge {
         @JavascriptInterface
         public void state(String json) { PlayerService.update(json); }
+
+        /** "+ FOLDER" in the library: open Android's folder picker. */
+        @JavascriptInterface
+        public void pickFolder() {
+            final MainActivity a = instance;
+            if (a != null) a.runOnUiThread(a::launchFolderPicker);
+        }
     }
 
     @Override
@@ -50,6 +62,8 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         web = findViewById(R.id.web);
         webRef = web;
+        instance = this;
+        FolderStore.init(this);
         web.addJavascriptInterface(new JsBridge(), "AndroidBridge");
         splash = findViewById(R.id.splash);
 
@@ -79,6 +93,18 @@ public class MainActivity extends Activity {
                     cb.onReceiveValue(null);
                     return false;
                 }
+                return true;
+            }
+
+            // WebView ignores confirm() unless we show the dialog ourselves
+            @Override
+            public boolean onJsConfirm(WebView v, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(message)
+                        .setPositiveButton(android.R.string.ok, (d, w) -> result.confirm())
+                        .setNegativeButton(android.R.string.cancel, (d, w) -> result.cancel())
+                        .setOnCancelListener(d -> result.cancel())
+                        .show();
                 return true;
             }
 
@@ -130,6 +156,13 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
+        if (req == REQ_FOLDER) {
+            if (res == RESULT_OK && data != null && data.getData() != null) {
+                FolderStore.add(data.getData());
+                web.evaluateJavascript("window.onFoldersChanged && window.onFoldersChanged()", null);
+            }
+            return;
+        }
         if (req != REQ_FILES) { super.onActivityResult(req, res, data); return; }
         Uri[] result = null;
         if (res == RESULT_OK && data != null) {
@@ -145,8 +178,20 @@ public class MainActivity extends Activity {
         chooserCallback = null;
     }
 
+    private void launchFolderPicker() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        try {
+            startActivityForResult(i, REQ_FOLDER);
+        } catch (Exception e) {
+            android.util.Log.e("Pleyer", "no folder picker available", e);
+        }
+    }
+
     @Override
     protected void onDestroy() {
+        if (instance == this) instance = null;
         if (webRef == web) webRef = null;
         super.onDestroy();
     }

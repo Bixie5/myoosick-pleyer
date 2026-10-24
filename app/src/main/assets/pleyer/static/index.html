@@ -423,6 +423,7 @@ PASTE A LINK TO LOAD A VIDEO OR PLAYLIST.</div></div>
             <button class="btn sm" id="btnRefresh">REFRESH</button>
           </div>
           <div class="list">
+            <div id="foldersBox" style="display:none"><div class="section">FOLDERS</div><div id="folders"></div></div>
             <div id="downloads"></div>
             <div class="section">SAVED TAPES</div>
             <div id="library"></div>
@@ -484,7 +485,7 @@ function toast(msg, err = false) {
   $('#toasts').append(t); setTimeout(() => t.remove(), 4200);
 }
 function mkTrack(o) { return { uid: ++uid, title: 'Unknown', artist: '', duration: null, source: 'local', src: '', ref: null, thumb: null, ...o }; }
-const srcTag = t => ({ local: 'LOCAL', web: 'WEB', disk: 'SAVED' }[t.source] || '?');
+const srcTag = t => ({ local: 'LOCAL', web: 'WEB', disk: 'SAVED', folder: 'FOLDER' }[t.source] || '?');
 const cur = () => state.queue[state.index];
 function trackDur() {
   if (isFinite(audio.duration) && audio.duration > 0) return audio.duration;
@@ -807,7 +808,7 @@ function showTab(name) {
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === name));
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
   if (name === 'search') $('#q').focus();
-  if (name === 'library') loadLibrary();
+  if (name === 'library') { loadLibrary(); if (IS_ANDROID) loadFolders(); }
   if (name === 'queue') renderQueue();
   if (name === 'disc') renderDisc();
 }
@@ -1032,6 +1033,90 @@ addEventListener('keydown', e => {
   else if (k === '/') { e.preventDefault(); showTab('search'); }
 });
 
+/* ---------- android: real music folders in the library ----------
+   "+ FOLDER" opens Android's folder picker (the app remembers the folder). Tracks in a folder are
+   read by the on-phone server (/saf/file), so seeking, queueing and the visualizer all work. */
+const folderState = { list: [], open: null, files: new Map(), shown: 200 };
+async function loadFolders(force) {
+  if (!IS_ANDROID || !window.AndroidBridge) return;
+  try {
+    const j = await (await fetch('/api/folders')).json();
+    folderState.list = j.folders || [];
+    if (force) folderState.files.clear();
+  } catch (e) {}
+  renderFolders();
+}
+async function openFolder(f) {
+  if (folderState.open === f.uri) { folderState.open = null; return renderFolders(); }
+  folderState.open = f.uri; folderState.shown = 200; renderFolders();
+  if (folderState.files.has(f.uri)) return;
+  try {
+    const r = await fetch('/api/folders/scan?u=' + encodeURIComponent(f.uri));
+    const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+    folderState.files.set(f.uri, j.tracks);
+  } catch (e) { toast('FOLDER ERROR: ' + e.message, true); folderState.open = null; }
+  renderFolders();
+}
+function folderTrack(t) {
+  const base = stem(t.name), m = base.match(/^(.+?)\s+-\s+(.+)$/);
+  return mkTrack({ title: m ? m[2] : base, artist: m ? m[1] : (t.path || ''), source: 'folder',
+    src: '/saf/file?u=' + encodeURIComponent(t.uri) + '&n=' + encodeURIComponent(t.name), ref: t.uri });
+}
+function playFolderFrom(files, i, name) {   // replace the queue with the folder and start at track i
+  clearQueue();
+  addTracks(files.map(folderTrack));
+  playIndex(i);
+  toast(`PLAYING ${name} (${files.length} TRACKS)`);
+}
+function renderFolders() {
+  const box = $('#folders'); if (!box) return; box.replaceChildren();
+  if (!folderState.list.length) return box.append(h('div', { class: 'empty' }, 'NO FOLDERS YET.\nTAP + FOLDER TO ADD YOUR MUSIC.'));
+  folderState.list.forEach(f => {
+    const isOpen = folderState.open === f.uri, files = folderState.files.get(f.uri);
+    box.append(h('div', { class: 'row' + (isOpen ? ' cur' : ''), onclick: () => openFolder(f) },
+      h('div', { class: 'idx' }, isOpen ? '▼' : '▶'),
+      h('div', { class: 'info' }, h('div', { class: 't' }, f.name),
+        h('div', { class: 's' }, files ? files.length + ' TRACKS' : (isOpen ? 'SCANNING...' : 'TAP TO OPEN'))),
+      h('div', { class: 'd' }, ''),
+      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Remove folder', onclick: async e => {
+        e.stopPropagation();
+        if (!confirm('Remove "' + f.name + '" from the library? (Your files are not deleted.)')) return;
+        await fetch('/api/folders?u=' + encodeURIComponent(f.uri), { method: 'DELETE' });
+        folderState.files.delete(f.uri); if (folderState.open === f.uri) folderState.open = null; loadFolders();
+      } }, '✕'))));
+    if (!isOpen || !files) return;
+    if (!files.length) return box.append(h('div', { class: 'hint' }, 'NO AUDIO FILES IN THIS FOLDER.'));
+    box.append(h('div', { class: 'bar' },
+      h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, f.name) }, '▶ PLAY ALL'),
+      h('button', { class: 'btn sm', onclick: () => { addTracks(files.map(folderTrack)); toast(`ADDED ${files.length} TRACKS`); } }, '+ ADD ALL')));
+    files.slice(0, folderState.shown).forEach((t, i) => {
+      const tr = folderTrack(t);
+      box.append(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, f.name) },
+        h('div', { class: 'idx' }, String(i + 1)),
+        h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
+        h('div', { class: 'd' }, ''),
+        h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))));
+    });
+    if (files.length > folderState.shown) box.append(h('div', { class: 'row', onclick: () => { folderState.shown += 200; renderFolders(); } },
+      h('div', { class: 'idx' }, '…'), h('div', { class: 'info' }, h('div', { class: 't' }, `SHOW MORE (${files.length - folderState.shown} LEFT)`)), h('div', { class: 'd' }, ''), h('div', { class: 'acts' })));
+  });
+}
+function setupAndroidFolders() {
+  if (!IS_ANDROID) return;
+  const bar = $('#pane-library .bar');                       // +FILES / +FOLDER move here from QUEUE
+  bar.prepend($('#btnFolder')); bar.prepend($('#btnFiles'));
+  $('#btnAddAll').textContent = '+ SAVED';
+  if (!(window.AndroidBridge && window.AndroidBridge.pickFolder)) return;
+  $('#btnFolder').onclick = () => window.AndroidBridge.pickFolder();
+  $('#btnRefresh').addEventListener('click', () => loadFolders(true));
+  $('#foldersBox').style.display = 'block';
+  window.onFoldersChanged = async () => {
+    await loadFolders(true);
+    if (folderState.list.length) openFolder(folderState.list[folderState.list.length - 1]);   // show what was just added
+  };
+  loadFolders();
+}
+
 /* ---------- android app: lockscreen / notification controls ----------
    The app (AndroidBridge) shows a media card + quick-controls card. We tell it what is playing,
    and it sends button presses back through window.__cmd(). */
@@ -1066,6 +1151,7 @@ window.__cmd = c => {
 
 /* ---------- boot ---------- */
 async function boot() {
+  setupAndroidFolders();
   let s = {}; try { s = JSON.parse(localStorage.getItem('myoosick_pleyer.settings') || '{}'); } catch (e) {}
   state.shuffle = !!s.shuffle; state.repeat = s.repeat || 'off'; state.discover = !!s.discover;
   setVol(s.vol ?? 80); applyModes();

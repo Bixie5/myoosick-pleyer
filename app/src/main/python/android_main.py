@@ -109,6 +109,8 @@ def start(app_dir, downloads_dir, port):
 
     _patch_yt_dlp()
     import app as player  # the original app.py
+    import android_api
+    android_api.register(player.app)  # music-folder routes (Android only)
 
     def serve():
         player.app.run(host="127.0.0.1", port=int(port), threaded=True, use_reloader=False)

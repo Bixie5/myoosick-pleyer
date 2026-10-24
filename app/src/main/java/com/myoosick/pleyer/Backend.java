@@ -25,6 +25,7 @@ final class Backend {
     static synchronized void start(Context ctx) throws IOException {
         if (started) return;
         Context app = ctx.getApplicationContext();
+        FolderStore.init(app);
 
         // app.py needs real files on disk (it serves ./static), so unpack the assets.
         File dir = new File(app.getFilesDir(), "pleyer");
