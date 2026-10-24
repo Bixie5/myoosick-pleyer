@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
 import android.media.MediaMetadata;
 import android.media.session.MediaSession;
@@ -19,6 +20,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Log;
+import android.widget.RemoteViews;
 
 import org.json.JSONObject;
 
@@ -48,6 +50,8 @@ public class PlayerService extends Service {
     private MediaSession session;
     private NotificationManager nm;
     private PowerManager.WakeLock wakeLock;
+    private String artKey = "";
+    private Bitmap art;
 
     /** Called (from any thread) with the page's JSON state. */
     static void update(String json) {
@@ -121,7 +125,7 @@ public class PlayerService extends Service {
         if (intent != null && intent.getAction() != null && intent.getAction().startsWith(ACTION_PREFIX)) {
             MainActivity.sendCommand(intent.getAction().substring(ACTION_PREFIX.length()));
         }
-        return START_STICKY;
+        return START_NOT_STICKY;   // never let Android resurrect the player after it was closed
     }
 
     // ---------------------------------------------------------------- notifications
@@ -144,28 +148,66 @@ public class PlayerService extends Service {
         return "one".equals(r) ? R.drawable.ic_repeat_one : "all".equals(r) ? R.drawable.ic_repeat_on : R.drawable.ic_repeat;
     }
 
+    /** Retro cassette artwork for the current song (cached until title / artist / play state change). */
+    private Bitmap artFor(State s) {
+        String key = s.title + "\n" + s.artist + "\n" + s.playing;
+        if (!key.equals(artKey) || art == null) {
+            try {
+                art = RetroArt.render(this, s.title, s.artist, s.playing);
+                artKey = key;
+            } catch (Throwable t) {
+                Log.w("Pleyer", "art failed", t);
+            }
+        }
+        return art;
+    }
+
     private Notification buildMedia(State s) {
         boolean has = !s.title.isEmpty();
         Notification.MediaStyle style = new Notification.MediaStyle()
                 .setShowActionsInCompactView(1, 2, 3);
         if (session != null) style.setMediaSession(session.getSessionToken());
-        return new Notification.Builder(this, CHANNEL)
+        Notification.Builder nb = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_notify)
                 .setContentTitle(has ? s.title : "MYOOSICK PLEYER")
                 .setContentText(has ? s.artist : "Nothing playing")
+                .setSubText("MYOOSICK PLEYER")
                 .setContentIntent(openApp())
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
                 .setOngoing(true)
-                .setColor(0xFFE8742A)
+                .setColor(0xFF5A3A1D)          // wood brown, matches the deck
+                .setColorized(true)
                 .addAction(act(s.shuffle ? R.drawable.ic_shuffle_on : R.drawable.ic_shuffle, "Shuffle", "shuffle", 10))
                 .addAction(act(R.drawable.ic_prev, "Previous", "prev", 11))
                 .addAction(s.playing ? act(R.drawable.ic_pause, "Pause", "pause", 12)
                                      : act(R.drawable.ic_play, "Play", "play", 12))
                 .addAction(act(R.drawable.ic_next, "Next", "next", 13))
                 .addAction(act(repeatIcon(s.repeat), "Repeat", "repeat", 14))
-                .setStyle(style)
-                .build();
+                .setStyle(style);
+        Bitmap a = artFor(s);
+        if (a != null) nb.setLargeIcon(a);
+        return nb.build();
+    }
+
+    private static String volBar(int vol) {
+        int n = Math.max(0, Math.min(10, Math.round(vol / 10f)));
+        StringBuilder b = new StringBuilder("[");
+        for (int i = 0; i < 10; i++) b.append(i < n ? '#' : '-');
+        return b.append(']').toString();
+    }
+
+    /** The retro quick-controls card (wood frame, amber LCD, cream keycaps). */
+    private RemoteViews quickViews(State s) {
+        RemoteViews rv = new RemoteViews(getPackageName(), R.layout.notif_quick);
+        rv.setTextViewText(R.id.q_line1, "RADIO " + (s.disc ? "ON " : "OFF") + " | " + (s.playing ? "PLAY" : "PAUSE"));
+        rv.setTextViewText(R.id.q_line2, "VOL " + volBar(s.vol) + " " + s.vol);
+        rv.setImageViewResource(R.id.q_disc, s.disc ? R.drawable.k_disc_on : R.drawable.k_disc);
+        rv.setInt(R.id.q_disc, "setBackgroundResource", s.disc ? R.drawable.q_key_on : R.drawable.q_key);
+        rv.setOnClickPendingIntent(R.id.q_disc, cmd("disc", 20));
+        rv.setOnClickPendingIntent(R.id.q_vdown, cmd("voldown", 21));
+        rv.setOnClickPendingIntent(R.id.q_vup, cmd("volup", 22));
+        return rv;
     }
 
     /** Second card: the things the 5-button media card has no room for. */
@@ -178,20 +220,23 @@ public class PlayerService extends Service {
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
                 .setOngoing(true)
-                .addAction(act(s.disc ? R.drawable.ic_disc_on : R.drawable.ic_disc, s.disc ? "Radio: ON" : "Radio: OFF", "disc", 20))
-                .addAction(act(R.drawable.ic_vol_down, "Vol -", "voldown", 21))
-                .addAction(act(R.drawable.ic_vol_up, "Vol +", "volup", 22))
+                .setColor(0xFFE8742A)
+                .setStyle(new Notification.DecoratedCustomViewStyle())
+                .setCustomContentView(quickViews(s))
+                .setCustomBigContentView(quickViews(s))
                 .build();
     }
 
     private void refresh() {
         State s = last;
         boolean has = !s.title.isEmpty();
-        session.setMetadata(new MediaMetadata.Builder()
+        MediaMetadata.Builder md = new MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, has ? s.title : "MYOOSICK PLEYER")
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, has ? s.artist : "Nothing playing")
-                .putLong(MediaMetadata.METADATA_KEY_DURATION, s.dur)
-                .build());
+                .putLong(MediaMetadata.METADATA_KEY_DURATION, s.dur);
+        Bitmap a = artFor(s);
+        if (a != null) md.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, a).putBitmap(MediaMetadata.METADATA_KEY_ART, a);
+        session.setMetadata(md.build());
         PlaybackState.Builder pb = new PlaybackState.Builder()
                 .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE
                         | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS
@@ -210,11 +255,35 @@ public class PlayerService extends Service {
         nm.notify(ID_QUICK, buildQuick(s));
     }
 
+    /** The user swiped the app out of the recents list: stop everything and end the process. */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        shutdownEverything();
+        super.onTaskRemoved(rootIntent);
+    }
+
+    private void shutdownEverything() {
+        try {
+            MainActivity.sendCommand("pause");
+            nm.cancel(ID_MEDIA);
+            nm.cancel(ID_QUICK);
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            if (session != null) { session.setActive(false); session.release(); session = null; }
+            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        } catch (Exception e) {
+            Log.w("Pleyer", "shutdown", e);
+        }
+        stopSelf();
+        // ends the Python server, the WebView and any audio with it
+        android.os.Process.killProcess(android.os.Process.myPid());
+    }
+
     @Override
     public void onDestroy() {
         instance = null;
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (session != null) { session.setActive(false); session.release(); }
+        nm.cancel(ID_MEDIA);
         nm.cancel(ID_QUICK);
         super.onDestroy();
     }

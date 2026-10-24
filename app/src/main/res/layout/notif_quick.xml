@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:padding="3dp"
+    android:background="@drawable/q_wood">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="42dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:background="@drawable/q_lcd">
+
+        <TextView
+            android:id="@+id/q_line1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#FFFFB000"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:typeface="monospace" />
+
+        <TextView
+            android:id="@+id/q_line2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#FFC98A00"
+            android:textSize="11sp"
+            android:typeface="monospace" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/q_disc"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:layout_marginStart="6dp"
+        android:padding="9dp"
+        android:background="@drawable/q_key"
+        android:contentDescription="Radio"
+        android:src="@drawable/k_disc" />
+
+    <ImageView
+        android:id="@+id/q_vdown"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:layout_marginStart="6dp"
+        android:padding="9dp"
+        android:background="@drawable/q_key"
+        android:contentDescription="Volume down"
+        android:src="@drawable/k_vol_down" />
+
+    <ImageView
+        android:id="@+id/q_vup"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:layout_marginStart="6dp"
+        android:padding="9dp"
+        android:background="@drawable/q_key"
+        android:contentDescription="Volume up"
+        android:src="@drawable/k_vol_up" />
+</LinearLayout>
