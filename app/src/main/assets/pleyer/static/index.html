@@ -287,6 +287,10 @@ html.android .reel, html.android .ts-reel{animation-timing-function:steps(24)}
 html.android .thumb{filter:none}
 html.android .toast{box-shadow:0 4px 8px rgba(0,0,0,.5)}
 html.android button, html.android .row, html.android .tab, html.android input{touch-action:manipulation}
+/* ---- library menu (android) ---- */
+#libMenu{display:flex; flex-direction:column; gap:8px; padding:10px}
+.libbtn{width:100%; justify-content:flex-start; font-size:11px; padding:15px 14px; letter-spacing:1px}
+html.android .libbtn.active{background:linear-gradient(#e8a21a,#ffd27a); box-shadow:0 1px 0 #8a5d00, inset 0 3px 6px rgba(0,0,0,.25); transform:translateY(3px)}
 /* ---- selection bar, popups, playlists ---- */
 #selBar{position:fixed; top:6px; left:6px; right:6px; z-index:80; display:none; gap:6px; align-items:center; padding:6px; background:var(--lcd-bg); border:2px solid var(--amber); border-radius:6px}
 #selBar .btn{padding:8px 6px; font-size:8px; min-width:0; flex:none}
@@ -1485,15 +1489,27 @@ function renderFolders() {
   });
 }
 /* android library: lists shown in place of the folders - ADDED (100 newest files), PLAYED (last 100 played), MOST (top 100 by plays) */
-const LISTS = { added: 'ADDED', played: 'PLAYED', most: 'MOST PLAYED', playlists: 'PLAYLISTS' };
-async function showLibList(kind) {
-  if (folderState.listOn === kind) kind = null;            // tapping the active button closes it
+const LISTS = { added: 'RECENTLY ADDED', played: 'RECENTLY PLAYED', most: 'MOST PLAYED', playlists: 'PLAYLISTS' };
+/* the library is a vertical menu; opening an entry hides the others, so the opened button stays on top (tap it to go back) */
+const LIB = [['folders', 'FOLDERS'], ['playlists', 'PLAYLISTS'], ['most', 'MOST PLAYED'], ['played', 'RECENTLY PLAYED'], ['added', 'RECENTLY ADDED']];
+function libOpen(kind) {
   folderState.listOn = kind;
-  for (const k in LISTS) $('#lb_' + k).classList.toggle('sel', k === kind);
-  $('#recentBox').style.display = kind ? 'block' : 'none';
-  $('#foldersBox').style.display = kind ? 'none' : 'block';
-  $('#downloads').style.display = kind ? 'none' : ''; $('#library').style.display = kind ? 'none' : '';
-  if (!kind) return;
+  for (const [k, label] of LIB) {
+    const b = $('#lb_' + k); if (!b) continue;
+    b.style.display = (!kind || k === kind) ? '' : 'none';
+    b.classList.toggle('active', k === kind);
+    b.textContent = (k === kind ? '\u25BC ' : '') + label;
+  }
+  $('#foldersBox').style.display = kind === 'folders' ? 'block' : 'none';
+  $('#recentBox').style.display = (kind && kind !== 'folders') ? 'block' : 'none';
+  $('#downloads').style.display = $('#library').style.display = kind === 'folders' ? '' : 'none';
+}
+function libPress(k) {
+  if (folderState.listOn === k) return libOpen(null);      // tap the open button again: back to the menu
+  libOpen(k);
+  if (k === 'folders') { loadFolders(); loadLibrary(); } else fillLibList(k);
+}
+async function fillLibList(kind) {
   if (kind === 'playlists') { plView = { mode: 'root' }; return renderPlaylists(); }
   const box = $('#recentBox'); box.replaceChildren(h('div', { class: 'empty' }, 'LOADING...'));
   let files = [], hint = '';
@@ -1524,16 +1540,17 @@ async function showLibList(kind) {
 }
 function setupAndroidFolders() {
   if (!IS_ANDROID) return;
-  const bar = $('#pane-library .bar');                       // +FILES / +FOLDER move here from QUEUE
+  const bar = $('#pane-library .bar');                       // holds + FOLDER and REFRESH
   bar.prepend($('#btnFolder'));
   $('#foldHead').remove(); $('#btnFiles').remove(); $('#btnAddAll').remove(); $('#savedHead').remove();        // not needed on the phone
-  const vb = h('div', { class: 'bar' });
-  for (const k in LISTS) vb.append(h('button', { class: 'btn sm', id: 'lb_' + k, onclick: () => showLibList(k) }, LISTS[k]));
-  bar.after(vb);
+  $('#foldersBox').prepend(bar);                             // + FOLDER / REFRESH now live inside FOLDERS
+  const menu = h('div', { id: 'libMenu' });
+  for (const [k, label] of LIB) menu.append(h('button', { class: 'btn libbtn', id: 'lb_' + k, onclick: () => libPress(k) }, label));
+  $('#pane-library').prepend(menu);
+  libOpen(null);
   if (!(window.AndroidBridge && window.AndroidBridge.pickFolder)) return;
   $('#btnFolder').onclick = () => window.AndroidBridge.pickFolder();
-  $('#btnRefresh').addEventListener('click', () => { loadFolders(true); if (folderState.listOn) { const k = folderState.listOn; folderState.listOn = null; showLibList(k); } });
-  $('#foldersBox').style.display = 'block';
+  $('#btnRefresh').addEventListener('click', () => { loadFolders(true); loadLibrary(); });
   window.onFoldersChanged = async () => {
     await loadFolders(true);
     if (folderState.list.length) openFolder(folderState.list[folderState.list.length - 1]);   // show what was just added
