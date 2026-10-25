@@ -359,7 +359,8 @@ html.android .libbtn.btn.active{background:var(--amber); color:#150e00; box-shad
           <text x="34" y="35" font-family="Press Start 2P, monospace" font-size="7" fill="#fff">A</text>
           <text x="286" y="35" font-family="Press Start 2P, monospace" font-size="7" fill="#fff" text-anchor="end">C-60</text>
           <text id="labelTitle" x="160" y="74" text-anchor="middle" font-family="Special Elite, Courier New, monospace" font-size="19" fill="#2a241c">INSERT TAPE</text>
-          <text id="labelSub" x="160" y="96" text-anchor="middle" font-family="Special Elite, Courier New, monospace" font-size="12" fill="#6b5b3f">SIDE A</text>
+          <text id="labelSub" x="160" y="95" text-anchor="middle" font-family="Special Elite, Courier New, monospace" font-size="12" fill="#6b5b3f">SIDE A</text>
+          <text id="labelFmt" x="160" y="104.5" text-anchor="middle" font-family="Courier New, monospace" font-size="7.5" font-weight="bold" letter-spacing=".5" fill="#8a7650"></text>
           <line x1="36" y1="80" x2="284" y2="80" stroke="#c9b98f" stroke-width="1" opacity=".0"/>
           <!-- window -->
           <rect x="58" y="114" width="204" height="58" rx="29" fill="#0f0e0c" stroke="#555" stroke-width="2"/>
@@ -733,6 +734,8 @@ audio.addEventListener('pause', () => { $('#deck').classList.remove('is-playing'
 audio.addEventListener('waiting', () => setStatus('BUFFERING'));
 audio.addEventListener('playing', () => setStatus('PLAY'));
 audio.addEventListener('loadstart', () => { if (cur()?.source === 'web') setStatus('TUNING'); });
+audio.addEventListener('loadedmetadata', () => { updateFmtLine(true); });
+audio.addEventListener('durationchange', () => { updateFmtLine(false); });
 audio.addEventListener('loadedmetadata', () => {
   const t = cur(); if (t && isFinite(audio.duration) && audio.duration > 0 && !t.duration) { t.duration = audio.duration; renderQueue(); }
   updateTime();
@@ -789,6 +792,109 @@ function updateTime() {
   $('#tapeL').setAttribute('r', (26 - 12 * frac).toFixed(1));
   $('#tapeR').setAttribute('r', (14 + 12 * frac).toFixed(1));
 }
+/* ---- audio format line on the cassette label: FORMAT · KBPS · KHZ (read from the file's own header; Android) ---- */
+const infoCache = new Map();
+async function headBytes(src, start, len) {          // fetch only a slice of the file
+  const ac = new AbortController(), to = setTimeout(() => ac.abort(), 7000);
+  try {
+    const r = await fetch(src, { headers: { Range: `bytes=${start}-${start + len - 1}` }, signal: ac.signal });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const rd = r.body.getReader(), parts = []; let n = 0;
+    while (n < len) { const { done, value } = await rd.read(); if (done) break; parts.push(value); n += value.length; }
+    try { rd.cancel(); } catch (e) {}
+    const buf = new Uint8Array(Math.min(n, len)); let o = 0;
+    for (const p of parts) { const take = Math.min(p.length, buf.length - o); buf.set(p.subarray(0, take), o); o += take; }
+    let total = null; const cr = r.headers.get('Content-Range'), m = cr && cr.match(/\/(\d+)$/);
+    if (m) total = +m[1]; else if (r.status === 200 && r.headers.get('Content-Length')) total = +r.headers.get('Content-Length');
+    return { buf, total, type: r.headers.get('Content-Type') || '' };
+  } finally { clearTimeout(to); }
+}
+const MP3_BR = { 1: { 3: [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320], 2: [0,32,48,56,64,80,96,112,128,160,192,224,256,320,384], 1: [0,32,64,96,128,160,192,224,256,288,320,352,384,416,448] },
+                 2: { 3: [0,8,16,24,32,40,48,56,64,80,96,112,128,144,160], 2: [0,8,16,24,32,40,48,56,64,80,96,112,128,144,160], 1: [0,32,48,56,64,80,96,112,128,144,160,176,192,224,256] } };
+const MP3_SR = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000] };
+const u32be = (b, o) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
+const u32le = (b, o) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+const tag4 = (b, o) => String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]);
+function findTag(b, name, from = 0) {
+  for (let i = from; i + 4 <= b.length; i++) if (b[i] === name.charCodeAt(0) && b[i + 1] === name.charCodeAt(1) && b[i + 2] === name.charCodeAt(2) && b[i + 3] === name.charCodeAt(3)) return i;
+  return -1;
+}
+function parseMp3(b, p) {                             // first valid frame header from p
+  for (let i = p; i + 4 < b.length && i < p + 8192; i++) {
+    if (b[i] !== 0xFF || (b[i + 1] & 0xE0) !== 0xE0) continue;
+    const ver = (b[i + 1] >> 3) & 3, layer = (b[i + 1] >> 1) & 3, bi = b[i + 2] >> 4, si = (b[i + 2] >> 2) & 3;
+    if (ver === 1 || layer === 0 || bi === 0 || bi === 15 || si === 3) continue;
+    const l = 4 - layer, kb = (MP3_BR[ver === 3 ? 1 : 2][l] || [])[bi], sr = MP3_SR[ver][si];
+    const vbr = findTag(b.subarray(i, i + 200), 'Xing') >= 0 || findTag(b.subarray(i, i + 200), 'VBRI') >= 0;
+    // AAC in ADTS has layer bits 00 and is skipped above; this is MPEG audio layer 1/2/3
+    return { fmt: l === 3 ? 'MP3' : l === 2 ? 'MP2' : 'MP1', khz: sr / 1000, kbps: vbr ? 0 : kb };
+  }
+  return null;
+}
+async function probeAudio(src) {
+  if (infoCache.has(src)) return infoCache.get(src);
+  const first = await headBytes(src, 0, 262144), b = first.buf; let info = null;
+  const t0 = tag4(b, 0);
+  if (t0 === 'fLaC') {
+    const o = 8; info = { fmt: 'FLAC', khz: ((b[o + 10] << 12) | (b[o + 11] << 4) | (b[o + 12] >> 4)) / 1000, kbps: 0 };
+  } else if (t0 === 'RIFF' && tag4(b, 8) === 'WAVE') {
+    const f = findTag(b, 'fmt '); if (f >= 0) info = { fmt: 'WAV', khz: u32le(b, f + 12) / 1000, kbps: Math.round(u32le(b, f + 16) * 8 / 1000) };
+  } else if (t0 === 'OggS') {
+    const seg = b[26], p = 27 + seg;
+    if (tag4(b, p) === 'Opus') info = { fmt: 'OPUS', khz: 48, kbps: 0 };
+    else if (b[p] === 1 && tag4(b, p + 1) === 'vorb') { const nom = u32le(b, p + 20); info = { fmt: 'OGG', khz: u32le(b, p + 12) / 1000, kbps: (nom > 0 && nom < 4000000) ? Math.round(nom / 1000) : 0 }; }
+  } else if (tag4(b, 4) === 'ftyp') {
+    let moov = null, off = 0, buf2 = b, base = 0;
+    for (let hop = 0; hop < 12 && !moov; hop++) {
+      if (off - base + 8 > buf2.length) { const g = await headBytes(src, off, 4096 + 8); buf2 = g.buf; base = off; if (buf2.length < 8) break; }
+      let size = u32be(buf2, off - base); const type = tag4(buf2, off - base + 4);
+      if (size === 1) break;                          // 64-bit sizes: not handled
+      if (type === 'moov') { const g = size <= buf2.length - (off - base) ? { buf: buf2.subarray(off - base, off - base + size) } : await headBytes(src, off, Math.min(size, 3145728)); moov = g.buf; break; }
+      if (size < 8) break; off += size;
+    }
+    const m = moov || b, st = findTag(m, 'stsd');
+    if (st >= 0) {
+      const et = tag4(m, st + 16), sr = u32be(m, st + 44) >>> 16;
+      info = { fmt: et === 'alac' ? 'ALAC' : et === 'mp4a' ? 'AAC' : 'M4A', khz: sr / 1000, kbps: 0 };
+    }
+  } else if (b[0] === 0x1A && b[1] === 0x45 && b[2] === 0xDF && b[3] === 0xA3) {
+    info = findTag(b, 'OPUS') >= 0 || findTag(b, 'A_OP') >= 0 ? { fmt: 'OPUS', khz: 48, kbps: 0 } : { fmt: 'WEBM', khz: 0, kbps: 0 };
+  } else {
+    let p = 0;
+    if (t0.slice(0, 3) === 'ID3') {
+      p = 10 + (((b[6] & 0x7f) << 21) | ((b[7] & 0x7f) << 14) | ((b[8] & 0x7f) << 7) | (b[9] & 0x7f)); if (b[5] & 0x10) p += 10;
+    }
+    let bb = b, pp = p;
+    if (p + 16 > b.length) { bb = (await headBytes(src, p, 8192)).buf; pp = 0; }   // big embedded picture: look past it
+    info = parseMp3(bb, pp);
+    if (!info && bb[pp] === 0xFF && (bb[pp + 1] & 0xF6) === 0xF0) {                // AAC in ADTS
+      const sr = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000][(bb[pp + 2] >> 2) & 15];
+      info = { fmt: 'AAC', khz: sr / 1000, kbps: 0 };
+    }
+  }
+  if (info) info.size = first.total || 0;
+  infoCache.set(src, info);
+  return info;
+}
+function fmtLineFor(info) {
+  if (!info) return '';
+  const dur = audio.duration && isFinite(audio.duration) ? audio.duration : (cur() && cur().duration) || 0;
+  const kbps = info.kbps || (info.size && dur ? Math.round(info.size * 8 / dur / 1000) : 0);
+  const khz = info.khz ? (Math.abs(info.khz - Math.round(info.khz)) < 0.01 ? String(Math.round(info.khz)) : info.khz.toFixed(1)) : '';
+  return [info.fmt, kbps ? kbps + ' KBPS' : '', khz ? khz + ' KHZ' : ''].filter(Boolean).join(' \u00B7 ');
+}
+let fmtFor = null;
+async function updateFmtLine(fresh) {
+  const el = $('#labelFmt'); if (!el || !IS_ANDROID) return;
+  const t = cur();
+  if (!t) { el.textContent = ''; fmtFor = null; return; }
+  if (fresh) { el.textContent = ''; fmtFor = t.uid; }
+  if (fmtFor !== t.uid) return;
+  try {
+    const info = await probeAudio(t.src);
+    if (cur() && cur().uid === t.uid) el.textContent = fmtLineFor(info);
+  } catch (e) { if (cur() && cur().uid === t.uid) el.textContent = ''; }
+}
 function updateNow() {
   const t = cur();
   const title = t ? t.title : 'INSERT TAPE';
@@ -802,6 +908,7 @@ function updateNow() {
   $('#stripTitle').textContent = trunc(title.toUpperCase(), 40);
   document.title = t ? `${audio.paused ? '' : '▶ '}${t.title} — MYOOSICK PLEYER` : 'MYOOSICK PLEYER';
   updateTime(); updateMediaMeta(); reportState();
+  if (IS_ANDROID) { const el = $('#labelFmt'); if (el && (!t || fmtFor !== t.uid)) { el.textContent = ''; fmtFor = t ? t.uid : null; } }
 }
 
 /* ---------- media session ---------- */
@@ -1739,7 +1846,8 @@ async function fillLibList(kind) {
   if (folderState.listOn !== kind) return;
   box.replaceChildren();
   if (!files.length) return box.append(h('div', { class: 'empty' }, hint || 'NOTHING YET.'));
-  box.append(h('div', { class: 'bar' }, h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, LISTS[kind], true) }, '▶ PLAY ALL')));
+  box.append(h('div', { class: 'bar' }, h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, LISTS[kind], true) }, '▶ PLAY ALL'),
+    kind === 'added' ? h('button', { class: 'btn sm', onclick: () => { toast('SCANNING FOLDERS...'); revalidateFolders(true); } }, 'REFRESH') : null));
   files.forEach((t, i) => {
     const tr = folderTrack(t);
     box.append(A(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, LISTS[kind]) },
