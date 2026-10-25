@@ -15,8 +15,8 @@ android {
         versionName "1.0"
 
         ndk {
-            // modern 64-bit phones (arm64) + emulator (x86_64)
-            abiFilters "arm64-v8a", "x86_64"
+            // real phones only (arm64): the x86_64 copy of Python + native libs was only for emulators
+            abiFilters "arm64-v8a"
         }
         python {
             version "3.12"

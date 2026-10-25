@@ -78,3 +78,20 @@ Delivery method: changed-files.zip (drag `app` folder into GitHub upload page) +
 
 ## 23. Resume where it stopped (done, Android + works in page generally)
 - The playing song and its position are saved (localStorage myoosick_pleyer.last) every ~3 s while playing, on pause, and when the app is hidden. On the next launch that song is shown on the deck at the saved time (paused); press play to continue from there. Folder songs also restore their folder, so next/previous/shuffle carry on through it. Works for online and local songs (songs added via the file picker can't be restored).
+
+24. Resume keeps the list + PLAY NEXT
+   - The list a song was played from (folder, ALL SONGS with its sort, RECENTLY ADDED, playlists, liked, MOST/RECENTLY PLAYED, local search results) is saved with the last-played song. After a restart, next/previous/shuffle continue through that same list.
+   - Long-press selection bar has a new NEXT button: puts the selected songs (in the order selected) right after the playing song.
+   - Only file changed: app/src/main/assets/pleyer/static/index.html
+
+25. Lyrics
+   - Swipe the amber display left to open a lyrics panel (swipe right, the X button, or Back closes it).
+   - Lyrics are saved per song on the phone. If none are saved, the app tries to find them online (lrclib.net, best-effort); if nothing is found, ADD lets you type or paste them. EDIT changes saved lyrics.
+   - Lyrics with [mm:ss] timestamps (synced) highlight and scroll with the song.
+   - Only file changed: app/src/main/assets/pleyer/static/index.html
+
+26. Check + slimming (no look / feature changes)
+   - Build: only arm64-v8a is packaged now (the x86_64 copy of Python/native libs was emulator-only and the biggest chunk of the APK).
+   - Removed unused files: java/.../CassetteArt.java, python/audioinfo.py, res/layout/notif_quick_big.xml, notif_quick_small.xml, notif_widget.xml, res/drawable/np_*.xml (7 files), and any __pycache__ folders. Added .gitignore.
+   - To get the saving in GitHub: upload app/build.gradle + .gitignore, and DELETE those old files from the repo (uploading never deletes).
+   - Checked: Java/Python syntax, no dead JS functions, no console logging, all pages tested with no page errors.
