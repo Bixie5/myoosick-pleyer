@@ -648,6 +648,7 @@ function saveSettings() {
 /* ---------- playback ---------- */
 function load(i) {
   const t = state.queue[i]; if (!t) return;
+  if (pendingSeek && statKey(t) !== pendingSeek.key) pendingSeek = null;
   state.index = i; loadedUid = t.uid; countedFor = null; audio.src = t.src;
   updateNow(); renderQueue();
 }
@@ -736,6 +737,52 @@ audio.addEventListener('playing', () => setStatus('PLAY'));
 audio.addEventListener('loadstart', () => { if (cur()?.source === 'web') setStatus('TUNING'); });
 audio.addEventListener('loadedmetadata', () => { updateFmtLine(true); });
 audio.addEventListener('durationchange', () => { updateFmtLine(false); });
+/* ---- remember where the music stopped: the song + position are saved while playing and restored on the next launch ---- */
+const LAST_KEY = 'myoosick_pleyer.last';
+let pendingSeek = null, lastSaved = 0;
+function saveLast(force) {
+  try {
+    const t = cur(); if (!t || t.source === 'local' || loadedUid !== t.uid) return;
+    const now = Date.now(); if (!force && now - lastSaved < 3000) return;
+    lastSaved = now;
+    localStorage.setItem(LAST_KEY, JSON.stringify({ snap: snapOf(t), pos: audio.ended ? 0 : (audio.currentTime || 0) }));
+  } catch (e) {}
+}
+audio.addEventListener('timeupdate', () => saveLast(false));
+audio.addEventListener('pause', () => saveLast(true));
+audio.addEventListener('ended', () => saveLast(true));
+addEventListener('pagehide', () => saveLast(true));
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveLast(true); });
+async function restoreFolderContext(t) {           // so next / previous / shuffle continue through the song's folder
+  if (!IS_ANDROID || t.source !== 'folder' || !t.ref) return;
+  try {
+    if (!folderState.list.length) { const j = await (await fetch('/api/folders')).json(); folderState.list = j.folders || []; }
+    const f = folderState.list.find(x => t.ref.startsWith(x.uri + '/document/')); if (!f) return;
+    let files = folderState.files.get(f.uri);
+    if (!files) { const r = await fetch('/api/folders/scan?u=' + encodeURIComponent(f.uri)), j = await r.json(); if (!r.ok) return; files = j.tracks; folderState.files.set(f.uri, files); }
+    const i = files.findIndex(x => x.uri === t.ref); if (i < 0) return;
+    if (state.dir || !cur() || statKey(cur()) !== statKey(t)) return;              // the user already moved on
+    state.dir = { files, name: f.name, i, hist: [], perm: null, p: 0 };
+    const q = state.queue[state.index]; if (q) q.dir = true;
+  } catch (e) {}
+}
+function restoreLast() {
+  try {
+    const L = JSON.parse(localStorage.getItem(LAST_KEY) || 'null'); if (!L || !L.snap) return;
+    const k = statKey(L.snap); let i = state.queue.findIndex(t => statKey(t) === k);
+    if (i < 0) { state.queue.unshift(mkTrack({ ...L.snap })); i = 0; }
+    state.index = i; pendingSeek = { key: k, pos: Math.max(0, +L.pos || 0) };
+    restoreFolderContext(state.queue[i]);
+  } catch (e) {}
+}
+audio.addEventListener('loadedmetadata', () => {
+  if (pendingSeek) {                              // first load after a restart: jump to where it stopped
+    const t = cur();
+    if (t && statKey(t) === pendingSeek.key && pendingSeek.pos > 0 && (!isFinite(audio.duration) || pendingSeek.pos < audio.duration - 1)) { try { audio.currentTime = pendingSeek.pos; } catch (e) {} }
+    pendingSeek = null;
+  }
+  saveLast(true);
+});
 audio.addEventListener('loadedmetadata', () => {
   const t = cur(); if (t && isFinite(audio.duration) && audio.duration > 0 && !t.duration) { t.duration = audio.duration; renderQueue(); }
   updateTime();
@@ -785,9 +832,10 @@ audio.addEventListener('error', () => {
 
 function updateTime() {
   const d = trackDur();
-  $('#cur').textContent = fmt(audio.currentTime || 0);
+  const ct = (pendingSeek && cur() && loadedUid !== cur().uid) ? pendingSeek.pos : (audio.currentTime || 0);   // remembered spot until the song is loaded
+  $('#cur').textContent = fmt(ct);
   $('#dur').textContent = d ? fmt(d) : '--:--';
-  const frac = d ? Math.min(1, (audio.currentTime || 0) / d) : 0;
+  const frac = d ? Math.min(1, ct / d) : 0;
   if (!dragging) { $('#seek').value = Math.round(frac * 1000); fillRange($('#seek')); }
   $('#tapeL').setAttribute('r', (26 - 12 * frac).toFixed(1));
   $('#tapeR').setAttribute('r', (14 + 12 * frac).toFixed(1));
@@ -1001,7 +1049,7 @@ $('#btnDisc').onclick = toggleDiscover;
 
 const seek = $('#seek');
 seek.addEventListener('input', () => { dragging = true; fillRange(seek); $('#cur').textContent = fmt(seek.value / 1000 * trackDur()); });
-seek.addEventListener('change', () => { const d = trackDur(); if (d) audio.currentTime = seek.value / 1000 * d; dragging = false; });
+seek.addEventListener('change', () => { const d = trackDur(); if (d) { if (pendingSeek && cur() && loadedUid !== cur().uid) { pendingSeek.pos = seek.value / 1000 * d; updateTime(); } else audio.currentTime = seek.value / 1000 * d; } dragging = false; });
 
 const vol = $('#vol');
 function setVol(v) { v = Math.max(0, Math.min(100, v)); vol.value = v; audio.volume = v / 100; $('#volNum').textContent = v; fillRange(vol); saveSettings(); reportState(); }
@@ -1936,6 +1984,7 @@ async function boot() {
     JSON.parse(localStorage.getItem('myoosick_pleyer.queue') || '[]').forEach(o => state.queue.push(mkTrack(o)));
     if (state.queue.length) state.index = 0;
   } catch (e) {}
+  restoreLast();
   fitCanvas(viz); fitCanvas(vu); updateNow(); renderQueue(); renderDownloads(); draw();
 
   if (location.protocol === 'file:') {

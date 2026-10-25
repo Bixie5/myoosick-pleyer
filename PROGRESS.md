@@ -71,3 +71,10 @@ Delivery method: changed-files.zip (drag `app` folder into GitHub upload page) +
 
 ## 21. FLAC with broken cover art (done, Android)
 - /saf/file now serves .flac files without their embedded PICTURE blocks (android_api._flac_plan/_open_reader), so a malformed cover image can't stop playback. Seeking still works (byte ranges are remapped). Tested with a FLAC that reproduces ffmpeg's "Could not read mimetype from an attached picture" and fails in Chromium (error 4) -> plays after the fix.
+
+## 22. REFRESH in Recently Added + format line on the cassette label (done, Android)
+- RECENTLY ADDED has a REFRESH button (rescans folders, updates the list).
+- Bottom of the cassette label shows FORMAT · KBPS · KHZ for the playing song, read from the file header (FLAC, MP3, WAV, OGG, OPUS, AAC/M4A/ALAC; online songs too). kbps = the header's bitrate for CBR MP3/WAV/OGG, otherwise average = file size / duration.
+
+## 23. Resume where it stopped (done, Android + works in page generally)
+- The playing song and its position are saved (localStorage myoosick_pleyer.last) every ~3 s while playing, on pause, and when the app is hidden. On the next launch that song is shown on the deck at the saved time (paused); press play to continue from there. Folder songs also restore their folder, so next/previous/shuffle carry on through it. Works for online and local songs (songs added via the file picker can't be restored).
