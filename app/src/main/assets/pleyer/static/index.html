@@ -72,6 +72,14 @@ body::after{ /* CRT scanlines + vignette */
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ---------- LCD ---------- */
+#lyr{position:absolute; inset:0; z-index:5; display:none; flex-direction:column; background:var(--lcd-bg); padding:6px 10px; font-size:18px; line-height:1.15}
+#lyr.on{display:flex}
+#lyr .lh{display:flex; justify-content:space-between; align-items:center; gap:6px; flex:none; font-family:var(--px); font-size:8px; color:var(--amber-soft); padding-bottom:4px}
+#lyr .lh .btn{padding:4px 6px; font-size:7px; min-width:0}
+#lyr .lb{flex:1; min-height:0; overflow-y:auto; white-space:pre-wrap; text-align:center; -webkit-overflow-scrolling:touch}
+#lyr .lb .ln{opacity:.55} #lyr .lb .ln.now{opacity:1; color:#ffd36b}
+#lyr .lb .none{opacity:.7; padding-top:14px}
+#modal textarea{width:100%; height:42vh; font-size:18px; line-height:1.15; background:#000; color:var(--amber); border:2px solid var(--amber-soft); padding:8px; font-family:var(--vt); resize:none}
 .lcd{
   margin-top:14px; padding:10px 14px 12px; border:3px solid var(--ink); border-radius:8px;
   background:var(--lcd-bg); color:var(--amber); font-size:24px; line-height:1.05;
@@ -408,6 +416,7 @@ html.android .libbtn.btn.active{background:var(--amber); color:#150e00; box-shad
           <div class="time"><span id="cur">00:00</span> <small>/ <span id="dur">00:00</span></small></div>
           <canvas id="vu"></canvas>
         </div>
+        <div id="lyr"><div class="lh"><span id="lyrTitle">LYRICS</span><span><button class="btn" id="lyrEdit" type="button">EDIT</button> <button class="btn" id="lyrX" type="button">✕</button></span></div><div class="lb" id="lyrBody"></div></div>
       </div>
 
       <div class="seekwrap"><input type="range" id="seek" min="0" max="1000" value="0" aria-label="Seek"></div>
@@ -961,6 +970,7 @@ async function updateFmtLine(fresh) {
 }
 function updateNow() {
   const t = cur();
+  if ($('#lyr') && lyrOpen() && (t ? statKey(t) : null) !== lyrFor) lyrRender();
   const title = t ? t.title : 'INSERT TAPE';
   const el = $('#title'); el.textContent = title; el.classList.remove('scroll');
   requestAnimationFrame(() => el.classList.toggle('scroll', el.scrollWidth > el.parentElement.clientWidth));
@@ -1974,11 +1984,98 @@ function reportState() {
   }, 120);
 }
 ['play', 'pause', 'seeked', 'loadedmetadata', 'durationchange'].forEach(ev => audio.addEventListener(ev, reportState));
+/* ---------- lyrics: swipe the amber display to the left. Saved per song; looked up online when none is saved ---------- */
+const LYR_KEY = 'myoosick_pleyer.lyrics';
+let lyrData = {}; try { lyrData = JSON.parse(localStorage.getItem(LYR_KEY) || '{}') || {}; } catch (e) {}
+const lyrMiss = new Set();
+let lyrLines = null, lyrCurLine = -1, lyrFor = null;
+function lyrSave() { try { localStorage.setItem(LYR_KEY, JSON.stringify(lyrData)); } catch (e) {} }
+function lyrParse(txt) {                                    // [mm:ss.xx] lines -> synced list, else null
+  const out = []; let n = 0;
+  for (const raw of txt.split(/\r?\n/)) {
+    const m = raw.match(/^((?:\[\d+:\d+(?:[.:]\d+)?\])+)(.*)$/); if (!m) continue;
+    for (const ts of m[1].match(/\[[^\]]+\]/g)) { const [a, b] = ts.slice(1, -1).split(':'); out.push({ t: +a * 60 + parseFloat(b.replace(':', '.')), s: m[2].trim() }); }
+    n++;
+  }
+  return n >= 3 ? out.sort((x, y) => x.t - y.t) : null;
+}
+function lyrOpen() { return $('#lyr').classList.contains('on'); }
+function lyrShow(on) {
+  $('#lyr').classList.toggle('on', on);
+  if (on) lyrRender();
+}
+function lyrRender() {
+  const t = cur(), body = $('#lyrBody'); lyrFor = t ? statKey(t) : null; lyrLines = null; lyrCurLine = -1;
+  $('#lyrTitle').textContent = t ? ('LYRICS · ' + t.title).slice(0, 34).toUpperCase() : 'LYRICS';
+  body.replaceChildren();
+  if (!t) { body.append(h('div', { class: 'none' }, 'NO SONG LOADED.')); $('#lyrEdit').style.display = 'none'; return; }
+  $('#lyrEdit').style.display = '';
+  const txt = lyrData[lyrFor];
+  if (!txt) {
+    $('#lyrEdit').textContent = 'ADD';
+    body.append(h('div', { class: 'none' }, lyrMiss.has(lyrFor) ? 'NO LYRICS FOUND.\nTAP ADD TO TYPE OR PASTE THEM.' : 'LOOKING FOR LYRICS...'));
+    if (!lyrMiss.has(lyrFor)) lyrFetch(t, lyrFor);
+    return;
+  }
+  $('#lyrEdit').textContent = 'EDIT';
+  lyrLines = lyrParse(txt);
+  if (lyrLines) lyrLines.forEach((l, i) => body.append(h('div', { class: 'ln', 'data-i': String(i) }, l.s || '♪')));
+  else body.append(document.createTextNode(txt));
+  lyrTick();
+}
+function lyrTick() {
+  if (!lyrLines || !lyrOpen()) return;
+  const tm = audio.currentTime || 0; let k = -1;
+  for (let i = 0; i < lyrLines.length && lyrLines[i].t <= tm + 0.15; i++) k = i;
+  if (k === lyrCurLine) return; lyrCurLine = k;
+  const kids = $('#lyrBody').children;
+  for (const c of kids) c.classList.remove('now');
+  const c = kids[k]; if (c) { c.classList.add('now'); const b = $('#lyrBody'); b.scrollTop = c.offsetTop - b.clientHeight / 2 + c.clientHeight / 2 - b.offsetTop; }
+}
+async function lyrFetch(t, key) {
+  try {
+    if (!navigator.onLine) throw 0;
+    const q = new URLSearchParams({ track_name: t.title, artist_name: t.artist || '' });
+    const d = audio.duration; if (isFinite(d) && d > 0) q.set('duration', Math.round(d));
+    let j = null;
+    const r = await fetch('https://lrclib.net/api/get?' + q, { signal: AbortSignal.timeout(8000) });
+    if (r.ok) j = await r.json();
+    else {
+      const r2 = await fetch('https://lrclib.net/api/search?q=' + encodeURIComponent((t.artist ? t.artist + ' ' : '') + t.title), { signal: AbortSignal.timeout(8000) });
+      const a = r2.ok ? await r2.json() : []; j = (a || []).find(x => x.syncedLyrics || x.plainLyrics) || null;
+    }
+    const txt = j && (j.syncedLyrics || j.plainLyrics);
+    if (txt) { lyrData[key] = txt.trim(); lyrSave(); } else lyrMiss.add(key);
+  } catch (e) { lyrMiss.add(key); }
+  if (lyrOpen() && lyrFor === key) lyrRender();
+}
+function lyrEdit() {
+  const t = cur(); if (!t) return; const key = statKey(t);
+  const ta = h('textarea', { spellcheck: 'false', placeholder: 'Type or paste the lyrics here...' }); ta.value = lyrData[key] || '';
+  modal('LYRICS · ' + t.title.slice(0, 26).toUpperCase(), ta, [
+    ['SAVE', () => { const v = ta.value.trim(); if (v) lyrData[key] = v; else delete lyrData[key]; lyrSave(); closeModal(); if (lyrOpen()) lyrRender(); toast(v ? 'LYRICS SAVED' : 'LYRICS REMOVED'); }],
+    ['CANCEL', closeModal]]);
+  setTimeout(() => ta.focus(), 60);
+}
+(function lyrInit() {
+  const lcd = $('.lcd'); let x0 = 0, y0 = 0, on = false;
+  lcd.addEventListener('touchstart', e => { if (e.touches.length !== 1) { on = false; return; } on = true; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  lcd.addEventListener('touchend', e => {
+    if (!on) return; on = false;
+    const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (dx < 0 && !lyrOpen()) lyrShow(true); else if (dx > 0 && lyrOpen()) lyrShow(false);
+  }, { passive: true });
+  $('#lyrX').onclick = () => lyrShow(false);
+  $('#lyrEdit').onclick = lyrEdit;
+  audio.addEventListener('timeupdate', lyrTick);
+})();
 /* Android back button / back swipe: undo the innermost thing that is open. Returns true if it handled it;
    false means "nothing left - go to the home screen" (the app keeps running in the background). */
 window.__back = () => {
   if (!IS_ANDROID) return false;
   const m = $('#modal'); if (m) { closeModal(); return true; }                        // popup
+  if (lyrOpen()) { lyrShow(false); return true; }                                     // lyrics
   if (selection.size) { selClear(); return true; }                                    // selection
   const a = document.activeElement; if (a && a.matches && a.matches('input[type=text]')) { a.blur(); return true; }
   if (viewMode === 'library') {
