@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
@@ -35,6 +36,7 @@ public final class FolderStore {
 
     public static void init(Context c) {
         app = c.getApplicationContext();
+        loadDurs();
     }
 
     private static SharedPreferences prefs() {
@@ -158,5 +160,115 @@ public final class FolderStore {
         ParcelFileDescriptor pfd = app.getContentResolver().openFileDescriptor(Uri.parse(docUri), "r");
         if (pfd == null) throw new java.io.FileNotFoundException(docUri);
         return pfd.detachFd();
+    }
+
+    // ------------------------------------------------------------------ song lengths (for sorting by duration)
+    // Reading a song's length means opening it, so it is done once, on a low-priority background thread,
+    // and remembered in files/durations.json. The page asks for progress and only fetches what is new.
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long> durs = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final List<String> durOrder = java.util.Collections.synchronizedList(new ArrayList<>());
+    private static volatile boolean durRunning;
+    private static volatile int durDone, durTotal;
+
+    private static java.io.File durFile() {
+        return new java.io.File(app.getFilesDir(), "durations.json");
+    }
+
+    private static void loadDurs() {
+        try {
+            java.io.File f = durFile();
+            if (!f.exists()) return;
+            byte[] b = new byte[(int) f.length()];
+            try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
+                int off = 0, n;
+                while (off < b.length && (n = in.read(b, off, b.length - off)) > 0) off += n;
+            }
+            JSONObject o = new JSONObject(new String(b, "UTF-8"));
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                durs.put(k, o.optLong(k, 0));
+                durOrder.add(k);
+            }
+        } catch (Throwable t) {
+            Log.w("Pleyer", "durations load", t);
+        }
+    }
+
+    private static synchronized void saveDurs() {
+        try {
+            JSONObject o = new JSONObject();
+            for (java.util.Map.Entry<String, Long> e : durs.entrySet()) o.put(e.getKey(), e.getValue());
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(durFile())) {
+                out.write(o.toString().getBytes("UTF-8"));
+            }
+        } catch (Throwable t) {
+            Log.w("Pleyer", "durations save", t);
+        }
+    }
+
+    /** Start reading the lengths of any of these files (JSON array of document URIs) we do not know yet. */
+    public static synchronized void durStart(String urisJson) {
+        if (durRunning) return;
+        final List<String> todo = new ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(urisJson);
+            for (int i = 0; i < a.length(); i++) {
+                String u = a.getString(i);
+                if (!durs.containsKey(u)) todo.add(u);
+            }
+        } catch (JSONException e) {
+            return;
+        }
+        durTotal = todo.size();
+        durDone = 0;
+        if (todo.isEmpty()) return;
+        durRunning = true;
+        Thread t = new Thread(() -> {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+            try {
+                for (String u : todo) {
+                    long ms = 0;
+                    MediaMetadataRetriever r = new MediaMetadataRetriever();
+                    try {
+                        r.setDataSource(app, Uri.parse(u));
+                        String d = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+                        if (d != null) ms = Long.parseLong(d);
+                    } catch (Throwable ignored) {
+                    } finally {
+                        try { r.release(); } catch (Throwable ignored) { }
+                    }
+                    durs.put(u, ms);
+                    durOrder.add(u);
+                    durDone++;
+                    if (durDone % 250 == 0) saveDurs();
+                }
+            } finally {
+                saveDurs();
+                durRunning = false;
+            }
+        }, "song-lengths");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** JSON: {"running":bool,"done":n,"total":n,"next":cursor,"map":{uri: ms}} with only the entries after `since`. */
+    public static String durJson(int since) {
+        JSONObject o = new JSONObject();
+        try {
+            JSONObject map = new JSONObject();
+            int next;
+            synchronized (durOrder) {
+                next = durOrder.size();
+                for (int i = Math.max(0, since); i < next; i++) {
+                    String u = durOrder.get(i);
+                    Long v = durs.get(u);
+                    if (v != null) map.put(u, v);
+                }
+            }
+            o.put("running", durRunning).put("done", durDone).put("total", durTotal).put("next", next).put("map", map);
+        } catch (JSONException ignored) {
+        }
+        return o.toString();
     }
 }

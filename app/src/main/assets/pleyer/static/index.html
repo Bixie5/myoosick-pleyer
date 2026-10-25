@@ -287,6 +287,14 @@ html.android .reel, html.android .ts-reel{animation-timing-function:steps(24)}
 html.android .thumb{filter:none}
 html.android .toast{box-shadow:0 4px 8px rgba(0,0,0,.5)}
 html.android button, html.android .row, html.android .tab, html.android input{touch-action:manipulation}
+/* ---- queue drag handle ---- */
+.grip{touch-action:none; cursor:grab; padding:2px 10px; font-size:30px; line-height:1; opacity:.85; user-select:none; -webkit-user-select:none}
+.row.dragging{position:relative; z-index:6; background:#3a2a08 !important; color:var(--amber) !important; box-shadow:0 6px 14px rgba(0,0,0,.7), inset 0 0 0 2px var(--amber); transition:none !important}
+#queue.list .row{transition:transform .12s}
+/* ---- all songs: virtual list ---- */
+.vbox{position:relative}
+.vrow{position:absolute; left:0; right:0; height:56px; box-sizing:border-box; overflow:hidden}
+#recentBox .bar .btn.sel{background:var(--amber); color:#150e00; box-shadow:0 1px 0 #000; transform:translateY(3px)}
 /* ---- library menu (android) ---- */
 #libMenu{display:flex; flex-direction:column; gap:8px; padding:10px; border-bottom:2px dashed var(--amber-dim)}
 .libbtn.btn{width:100%; justify-content:flex-start; font-size:8px; padding:9px 10px; letter-spacing:1px; background:linear-gradient(#3a2a08,#1f1500); color:var(--amber); border-color:var(--amber-soft); box-shadow:0 4px 0 #000, inset 0 1px 0 rgba(255,176,0,.35); text-shadow:none}
@@ -538,6 +546,7 @@ function addTracks(list, { play = false } = {}) {
   renderQueue(); saveQueue();
 }
 function renderQueueList() {
+  if (qDrag) { qDragDirty = true; return; }               // don't rebuild the list under a finger that is dragging
   const box = $('#queue'); box.replaceChildren();
   if (!state.queue.length) {
     box.append(h('div', { class: 'empty' }, h('pre', {}, ' .--------.\n | (o)(o) |\n \'--------\''), 'NO TAPES LOADED.\nADD FILES, DROP THEM HERE,\nOR SEARCH THE AIRWAVES.'));
@@ -551,9 +560,62 @@ function renderQueueList() {
         h('div', { class: 't' }, h('span', { class: 'tag' }, srcTag(t)), t.title),
         t.artist ? h('div', { class: 's' }, t.artist) : null),
       h('div', { class: 'd' }, fmt(t.duration)),
-      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Remove', onclick: e => { e.stopPropagation(); removeAt(i); } }, '✕'))), () => t));
+      h('div', { class: 'acts' }, IS_ANDROID ? gripFor(i) : null, h('button', { class: 'mini', title: 'Remove', onclick: e => { e.stopPropagation(); removeAt(i); } }, '✕'))), () => t));
   });
   const c = box.querySelector('.row.cur'); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'nearest' });
+}
+/* ---- drag a queue row up / down by its grip (≡) to change the order ---- */
+let qDrag = null, qDragDirty = false;
+function gripFor(i) {
+  const g = h('div', { class: 'grip', title: 'Drag to reorder' }, '≡');
+  g.addEventListener('click', e => e.stopPropagation());
+  g.addEventListener('pointerdown', e => startQueueDrag(e, g, i));
+  return g;
+}
+function startQueueDrag(e, grip, from) {
+  if (qDrag) return;
+  e.preventDefault(); e.stopPropagation();
+  const box = $('#queue'), rows = [...box.querySelectorAll(':scope > .row')], row = rows[from];
+  if (!row) return;
+  const rowH = row.offsetHeight || 50, y0 = e.clientY, sc0 = box.scrollTop;
+  let target = from, lastY = y0, raf = 0;
+  qDrag = { row }; row.classList.add('dragging');
+  try { grip.setPointerCapture(e.pointerId); } catch (_) {}
+  const apply = () => {
+    const dy = (lastY - y0) + (box.scrollTop - sc0);
+    row.style.transform = 'translateY(' + dy + 'px)';
+    target = Math.max(0, Math.min(rows.length - 1, from + Math.round(dy / rowH)));
+    rows.forEach((r, i) => {
+      if (r === row) return;
+      const shift = (from < target && i > from && i <= target) ? -rowH : (from > target && i >= target && i < from) ? rowH : 0;
+      r.style.transform = shift ? 'translateY(' + shift + 'px)' : '';
+    });
+  };
+  const tick = () => {                                     // scroll the list when the finger nears its top / bottom edge
+    const r = box.getBoundingClientRect(), edge = 44;
+    if (lastY < r.top + edge) box.scrollTop -= 10; else if (lastY > r.bottom - edge) box.scrollTop += 10;
+    apply(); raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  const move = ev => { lastY = ev.clientY; apply(); };
+  const end = ev => {
+    cancelAnimationFrame(raf);
+    grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', end); grip.removeEventListener('pointercancel', end);
+    const cancelled = ev.type === 'pointercancel';
+    qDrag = null;
+    if (!cancelled && target !== from) moveQueueItem(from, target);
+    else { rows.forEach(r => { r.style.transform = ''; }); row.classList.remove('dragging'); }
+    if (qDragDirty || (!cancelled && target !== from)) { qDragDirty = false; renderQueue(); }
+  };
+  grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+}
+function moveQueueItem(from, to) {
+  const playing = state.index;
+  const [t] = state.queue.splice(from, 1); state.queue.splice(to, 0, t);
+  if (playing === from) state.index = to;                  // the song that is playing keeps playing
+  else if (from < playing && to >= playing) state.index = playing - 1;
+  else if (from > playing && to <= playing) state.index = playing + 1;
+  saveQueue();
 }
 function removeAt(i) {
   const t = state.queue[i];
@@ -631,8 +693,10 @@ function dirNextK(auto) {                    // which file comes next (in order,
   if (k >= n) return (state.repeat === 'all' || !auto) ? 0 : -1;
   return k;
 }
+/* DISC (radio) only works with online songs: it is "on" only while the playing song is an online one (Android) */
+function radioOn() { const t = cur(); return state.discover && (!IS_ANDROID || !!(t && t.source === 'web')); }
 function nextIndex(auto) {
-  if (state.dir && !state.discover) {
+  if (state.dir && !radioOn()) {
     if (state.repeat === 'one' && auto && state.queue.length) return state.index;
     if (state.index + 1 < state.queue.length) return state.index + 1;      // songs you queued by hand play first
     const k = dirNextK(auto); if (k < 0) return -1;
@@ -641,19 +705,19 @@ function nextIndex(auto) {
   }
   const n = state.queue.length; if (!n) return -1;
   if (state.repeat === 'one' && auto) return state.index;
-  if (state.discover) { const j = state.index + 1; return j < n ? j : -1; }  // radio plays in order
+  if (radioOn()) { const j = state.index + 1; return j < n ? j : -1; }  // radio plays in order
   if (state.shuffle && n > 1) { let r; do { r = Math.floor(Math.random() * n); } while (r === state.index); return r; }
   let i = state.index + 1;
   if (i >= n) { if (state.repeat === 'all' || !auto) i = 0; else return -1; }
   return i;
 }
 async function next() {
-  if (state.discover && state.index + 1 >= state.queue.length) await discoverMore();
+  if (radioOn() && state.index + 1 >= state.queue.length) await discoverMore();
   const i = nextIndex(false); if (i >= 0) playIndex(i);
 }
 function prev() {
   if (audio.currentTime > 3) { audio.currentTime = 0; return; }
-  if (state.dir && !state.discover && state.queue[state.index] && state.queue[state.index].dir) {
+  if (state.dir && !radioOn() && state.queue[state.index] && state.queue[state.index].dir) {
     const d = state.dir; let k = d.hist.length ? d.hist.pop() : (d.i > 0 ? d.i - 1 : -1);
     if (k < 0) { audio.currentTime = 0; return; }
     if (d.perm && d.perm[d.p - 1] === k) d.p--;
@@ -676,10 +740,10 @@ audio.addEventListener('loadedmetadata', () => {
 audio.addEventListener('timeupdate', updateTime);
 audio.addEventListener('ended', async () => {
   let i = nextIndex(true);
-  if (i < 0 && state.discover) { await discoverMore(); i = nextIndex(true); }
+  if (i < 0 && radioOn()) { await discoverMore(); i = nextIndex(true); }
   i < 0 ? stop() : playIndex(i);
 });
-audio.addEventListener('play', () => { if (state.discover) discoverPrefetch(); });
+audio.addEventListener('play', () => { if (radioOn()) discoverPrefetch(); });
 // when a web song won't play, ask the server why and show its real error
 audio.addEventListener('error', async () => {
   const t = cur(); if (!t || t.source !== 'web' || !audio.src) return;
@@ -695,7 +759,7 @@ audio.addEventListener('playing', () => { discFails = 0; });
 audio.addEventListener('error', () => {
   if (!state.discover || !audio.src) return;
   if (++discFails > 3) { discFails = 0; return toast("DISCOVER STOPPED: SONGS WON'T PLAY. CHECK CONNECTION / UPDATE YT-DLP", true); }
-  setTimeout(() => { if (state.discover) next(); }, 800);
+  setTimeout(() => { if (radioOn()) next(); }, 800);
 });
 audio.addEventListener('error', () => {
   if (!audio.getAttribute('src')) return;
@@ -822,8 +886,9 @@ function toggleDiscover() {
   state.discover = !state.discover; applyModes(); saveSettings();
   if (!state.discover) return toast('DISCOVER OFF');
   toast('DISCOVER ON - SIMILAR SONGS WILL KEEP PLAYING');
+  if (IS_ANDROID && !radioOn() && cur()) toast('RADIO ONLY WORKS WITH ONLINE SONGS');
   if (!state.queue.length) toast('SEARCH A SONG TO START');
-  else if (!audio.paused) discoverPrefetch();
+  else if (!audio.paused && radioOn()) discoverPrefetch();
 }
 $('#btnDisc').onclick = toggleDiscover;
 
@@ -902,7 +967,7 @@ function renderDisc() {
   const sw = $('#discSwitch'); sw.textContent = 'RADIO: ' + (state.discover ? 'ON' : 'OFF'); sw.classList.toggle('on', state.discover);
   const box = $('#discList'), t = cur(); box.replaceChildren();
   box.append(h('div', { class: 'hint' }, state.discover
-    ? (t ? 'RADIO ON. SIMILAR SONGS KEEP PLAYING.\nSEEDED BY: ' + t.title : 'RADIO ON. PLAY A SONG TO START.')
+    ? (t && !radioOn() ? 'RADIO IS ON BUT ONLY WORKS WITH ONLINE SONGS.\nPLAY A SONG FROM SEARCH TO START IT.' : t ? 'RADIO ON. SIMILAR SONGS KEEP PLAYING.\nSEEDED BY: ' + t.title : 'RADIO ON. PLAY A SONG TO START.')
     : 'RADIO OFF. TURN IT ON AND SIMILAR SONGS KEEP PLAYING.'));
   const row = (title, sub, dur, onclick) => h('div', { class: 'row', onclick },
     h('div', { class: 'idx' }, '♪'),
@@ -910,7 +975,7 @@ function renderDisc() {
     h('div', { class: 'd' }, fmt(dur)), h('div', { class: 'acts' }));
   box.append(h('div', { class: 'section' }, 'UP NEXT'));
   const ahead = state.queue.map((x, i) => [x, i]).filter(([, i]) => i > state.index);
-  if (!ahead.length) box.append(h('div', { class: 'hint' }, state.discover ? 'NOTHING QUEUED YET. TAP + MORE.' : '---'));
+  if (!ahead.length) box.append(h('div', { class: 'hint' }, radioOn() ? 'NOTHING QUEUED YET. TAP + MORE.' : '---'));
   ahead.slice(0, 40).forEach(([x, i]) => box.append(row(x.title, x.artist, x.duration, () => playIndex(i))));
   if (state.pool.length) {
     box.append(h('div', { class: 'section' }, 'IN THE POOL'));
@@ -920,15 +985,24 @@ function renderDisc() {
 if (IS_ANDROID) {
   $('#paneView').append($('.panes'));
   $('#q').placeholder = 'SEARCH OR PASTE LINK';
+  let discTap = 0, discTimer = null;
   document.querySelectorAll('.mode').forEach(b => b.onclick = () => {
     const m = b.dataset.mode;
+    if (m === 'disc') {
+      // DISC: one tap opens it, a tap on it again goes back; a quick DOUBLE tap turns the radio on / off
+      const now = Date.now();
+      if (now - discTap < 320) { discTap = 0; clearTimeout(discTimer); discTimer = null; if (viewMode !== 'disc') setView('disc'); toggleDiscover(); return; }
+      discTap = now;
+      if (viewMode !== 'disc') return setView('disc');
+      clearTimeout(discTimer); discTimer = setTimeout(() => { discTimer = null; setView('tape'); }, 300);   // waits to see if it is a double tap
+      return;
+    }
     if (viewMode === m) return setView('tape');
     setView(m);
-    if (m === 'disc' && !state.discover) toggleDiscover();   // opening Discover also turns the radio on
   });
   $('#tapeStrip').onclick = () => setView('tape');
   $('#discSwitch').onclick = toggleDiscover;
-  $('#discMore').onclick = () => { if (!state.queue.length) toast('SEARCH OR ADD A SONG FIRST'); else discoverMore(); };
+  $('#discMore').onclick = () => { if (!state.queue.length) toast('SEARCH OR ADD A SONG FIRST'); else if (!radioOn()) toast('RADIO ONLY WORKS WITH ONLINE SONGS'); else discoverMore(); };
 }
 
 /* ---------- online search ---------- */
@@ -1221,7 +1295,7 @@ function attachRow(el, getTrack) {
   const reset = () => { stop(); active = false; el.style.transform = ''; };
   el.addEventListener('contextmenu', e => e.preventDefault());
   el.addEventListener('pointerdown', e => {
-    if (e.target.closest('button')) return;
+    if (e.target.closest('button, .grip')) return;
     active = true; x0 = e.clientX; y0 = e.clientY; dx = 0; el._lp = false; stop();
     timer = setTimeout(() => {                                   // long press: select / unselect
       timer = null; active = false; el._lp = true; el.style.transform = '';
@@ -1242,7 +1316,7 @@ function attachRow(el, getTrack) {
   });
   el.addEventListener('pointercancel', reset);
   el.addEventListener('click', e => {
-    if (e.target.closest('button')) return;
+    if (e.target.closest('button, .grip')) return;
     if (el._lp) { el._lp = false; e.stopImmediatePropagation(); e.preventDefault(); return; }
     if (selection.size) { e.stopImmediatePropagation(); e.preventDefault(); selToggle(el); }
   }, true);
@@ -1489,10 +1563,145 @@ function renderFolders() {
       h('div', { class: 'idx' }, '…'), h('div', { class: 'info' }, h('div', { class: 't' }, `SHOW MORE (${files.length - folderState.shown} LEFT)`)), h('div', { class: 'd' }, ''), h('div', { class: 'acts' })));
   });
 }
+/* The phone remembers each folder's scan (so lists open instantly). Once per launch, and on REFRESH, every folder is
+   rescanned quietly in the background; if anything changed, the lists are updated. */
+const scanSig = a => a.length + ':' + a.reduce((n, t) => n + (t.mod || 0) + (t.size || 0), 0);
+let revalidating = false, revalidated = false;
+async function revalidateFolders(announce) {
+  if (!IS_ANDROID || !window.AndroidBridge || revalidating) return;
+  revalidating = true; revalidated = true;
+  let changed = false;
+  try {
+    if (!folderState.list.length) { const j = await (await fetch('/api/folders')).json(); folderState.list = j.folders || []; }
+    for (const f of folderState.list.slice()) {
+      try {
+        const r = await fetch('/api/folders/scan?fresh=1&u=' + encodeURIComponent(f.uri)), j = await r.json();
+        if (!r.ok) continue;
+        const old = folderState.files.get(f.uri);
+        if (!old || scanSig(old) !== scanSig(j.tracks)) { folderState.files.set(f.uri, j.tracks); changed = true; }
+      } catch (e) {}
+    }
+  } finally { revalidating = false; }
+  if (changed) {
+    const k = folderState.listOn;
+    if (k === 'all') renderAllSongs(); else if (k === 'added') fillLibList('added'); else if (k === 'folders') renderFolders();
+    toast('LIBRARY UPDATED');
+  } else if (announce) toast('LIBRARY IS UP TO DATE');
+}
 /* android library: lists shown in place of the folders - ADDED (100 newest files), PLAYED (last 100 played), MOST (top 100 by plays) */
-const LISTS = { added: 'RECENTLY ADDED', played: 'RECENTLY PLAYED', most: 'MOST PLAYED', playlists: 'PLAYLISTS' };
+const LISTS = { all: 'ALL SONGS', added: 'RECENTLY ADDED', played: 'RECENTLY PLAYED', most: 'MOST PLAYED', playlists: 'PLAYLISTS' };
+/* ---- ALL SONGS: every audio file from every added folder, sortable. Only the rows on screen exist in the page
+   (a "virtual" list with fixed-height rows), so thousands of songs scroll without lag. ---- */
+const ROW_H = 56;
+const allState = { by: 'name', dir: 1, files: [], sorted: [], dur: new Map(), cursor: 0, running: false, done: 0, total: 0, timer: null, first: -1, last: -2, vbox: null };
+const durMs = t => { const v = allState.dur.get(t.uri); return v > 0 ? v : null; };
+async function fetchDurs() {
+  try {
+    const j = await (await fetch('/api/durations?since=' + allState.cursor)).json();
+    for (const u in (j.map || {})) allState.dur.set(u, j.map[u]);
+    allState.cursor = j.next || 0; allState.running = !!j.running; allState.done = j.done || 0; allState.total = j.total || 0;
+  } catch (e) {}
+}
+function allProgress() {
+  const el = $('#allProg'); if (!el) return;
+  el.textContent = allState.running ? `READING LENGTHS ${allState.done}/${allState.total}` : '';
+}
+function durPoll() {
+  if (allState.timer) return;
+  allState.timer = setInterval(async () => {
+    await fetchDurs(); allProgress();
+    if (!allState.running) {
+      clearInterval(allState.timer); allState.timer = null;
+      if (folderState.listOn === 'all' && allState.by === 'length') { sortAll(); allPaint(true); }
+    }
+  }, 2000);
+}
+async function startDurs() {
+  const uris = allState.files.filter(t => allState.dur.get(t.uri) == null).map(t => t.uri);
+  if (!uris.length) return;
+  try { await fetch('/api/durations/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(uris) }); } catch (e) { return; }
+  allState.running = true; allState.done = 0; allState.total = uris.length; allProgress(); durPoll();
+}
+function sortAll() {
+  const { by, dir } = allState, a = allState.files.slice();
+  if (by === 'length') {                                      // songs whose length is not known yet go last
+    const known = [], unknown = [];
+    for (const t of a) (durMs(t) == null ? unknown : known).push(t);
+    known.sort((x, y) => (durMs(x) - durMs(y)) * dir);
+    allState.sorted = known.concat(unknown);
+  } else {
+    const cmp = by === 'name' ? (x, y) => (x._k < y._k ? -1 : x._k > y._k ? 1 : 0)
+      : by === 'date' ? (x, y) => (x.mod || 0) - (y.mod || 0)
+      : (x, y) => (x.size || 0) - (y.size || 0);
+    a.sort((x, y) => cmp(x, y) * dir);
+    allState.sorted = a;
+  }
+}
+function allRow(i) {
+  const t = allState.sorted[i], tr = folderTrack(t), by = allState.by;
+  const d = by === 'size' ? fmtSize(t.size) : (durMs(t) != null ? fmt(durMs(t) / 1000) : '');
+  const row = A(h('div', { class: 'row vrow', style: 'top:' + (i * ROW_H) + 'px', onclick: () => playFolderFrom(allState.sorted, i, 'ALL SONGS') },
+    h('div', { class: 'idx' }, String(i + 1)),
+    h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
+    h('div', { class: 'd' }, d),
+    h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))), () => tr);
+  return row;
+}
+let allRaf = 0;
+function allPaint(force) {
+  const vb = allState.vbox, sc = $('#recentBox').closest('.list');
+  if (!vb || !vb.isConnected || !sc || folderState.listOn !== 'all') return;
+  const n = allState.sorted.length;
+  const off = sc.getBoundingClientRect().top - vb.getBoundingClientRect().top;       // how far the list is scrolled
+  const visFirst = Math.max(0, Math.floor(off / ROW_H)), visLast = Math.min(n - 1, Math.ceil((off + sc.clientHeight) / ROW_H));
+  if (!force && (visFirst >= allState.first + 2 || allState.first === 0) && (visLast <= allState.last - 2 || allState.last === n - 1)) return;   // rows on screen already exist
+  const first = Math.max(0, visFirst - 14), last = Math.min(n - 1, visLast + 14);
+  allState.first = first; allState.last = last;
+  const frag = document.createDocumentFragment();
+  for (let i = first; i <= last; i++) frag.append(allRow(i));
+  vb.replaceChildren(frag);
+}
+function allSchedule() { if (!allRaf) allRaf = requestAnimationFrame(() => { allRaf = 0; allPaint(false); }); }
+async function renderAllSongs() {
+  const box = $('#recentBox'); box.replaceChildren(h('div', { class: 'empty' }, 'LOADING SONGS...'));
+  try { await scanAllFolders(); await fetchDurs(); } catch (e) {}
+  if (folderState.listOn !== 'all') return;
+  const files = [];
+  for (const f of folderState.list) for (const t of (folderState.files.get(f.uri) || [])) { if (!t._k) t._k = stem(t.name).toLowerCase(); files.push(t); }
+  allState.files = files;
+  box.replaceChildren();
+  if (!files.length) return box.append(h('div', { class: 'empty' }, 'NO SONGS YET.\nADD A FOLDER FIRST.'));
+  const sortBtns = [['name', 'NAME'], ['date', 'DATE'], ['size', 'SIZE'], ['length', 'LENGTH']].map(([k, label]) => {
+    const b = h('button', { class: 'btn sm', id: 'as_' + k, onclick: () => {
+      if (allState.by === k) allState.dir *= -1; else { allState.by = k; allState.dir = k === 'name' ? 1 : -1; }
+      if (k === 'length') startDurs();
+      sortAll(); updSortBtns(); allState.vbox.replaceChildren(); allState.first = -1; allState.last = -2;
+      const sc = box.closest('.list'); if (sc) sc.scrollTop = 0;
+      allPaint(true);
+    } }, label);
+    return b;
+  });
+  const updSortBtns = () => [['name', 'NAME'], ['date', 'DATE'], ['size', 'SIZE'], ['length', 'LENGTH']].forEach(([k, label]) => {
+    const b = $('#as_' + k); b.textContent = label + (allState.by === k ? (allState.dir > 0 ? ' \u25B2' : ' \u25BC') : ''); b.classList.toggle('sel', allState.by === k);
+  });
+  box.append(h('div', { class: 'bar' }, ...sortBtns));
+  box.append(h('div', { class: 'bar' },
+    h('button', { class: 'btn sm', onclick: () => playFolderFrom(allState.sorted, 0, 'ALL SONGS', true) }, '\u25B6 PLAY ALL'),
+    h('span', { class: 'pname', id: 'allProg', style: 'font-size:15px' }, ''), h('span', { class: 'pname', style: 'flex:none; font-size:15px' }, files.length + ' SONGS')));
+  const vb = h('div', { class: 'vbox', style: 'height:' + (files.length * ROW_H) + 'px' });
+  box.append(vb); allState.vbox = vb; allState.first = -1; allState.last = -2;
+  updSortBtns(); sortAll(); allProgress();
+  if (allState.by === 'length') startDurs();
+  allPaint(true);
+}
+(function () {   // repaint the visible rows while scrolling (once per frame)
+  const sc = document.querySelector('#recentBox') && document.querySelector('#recentBox').closest('.list');
+  if (sc) sc.addEventListener('scroll', allSchedule, { passive: true });
+  addEventListener('resize', allSchedule);
+})();
+
 /* the library is a vertical menu; opening an entry hides the others, so the opened button stays on top (tap it to go back) */
-const LIB = [['folders', 'FOLDERS'], ['playlists', 'PLAYLISTS'], ['most', 'MOST PLAYED'], ['played', 'RECENTLY PLAYED'], ['added', 'RECENTLY ADDED']];
+const LIB = [['folders', 'FOLDERS'], ['all', 'ALL SONGS'], ['playlists', 'PLAYLISTS'], ['most', 'MOST PLAYED'], ['played', 'RECENTLY PLAYED'], ['added', 'RECENTLY ADDED']];
 function libOpen(kind) {
   folderState.listOn = kind;
   for (const [k, label] of LIB) {
@@ -1511,6 +1720,7 @@ function libPress(k) {
   if (k === 'folders') { loadFolders(); loadLibrary(); } else fillLibList(k);
 }
 async function fillLibList(kind) {
+  if (kind === 'all') return renderAllSongs();
   if (kind === 'playlists') { plView = { mode: 'root' }; return renderPlaylists(); }
   const box = $('#recentBox'); box.replaceChildren(h('div', { class: 'empty' }, 'LOADING...'));
   let files = [], hint = '';
@@ -1551,12 +1761,13 @@ function setupAndroidFolders() {
   libOpen(null);
   if (!(window.AndroidBridge && window.AndroidBridge.pickFolder)) return;
   $('#btnFolder').onclick = () => window.AndroidBridge.pickFolder();
-  $('#btnRefresh').addEventListener('click', () => { loadFolders(true); loadLibrary(); });
+  $('#btnRefresh').addEventListener('click', () => { toast('SCANNING FOLDERS...'); loadFolders(true); loadLibrary(); revalidateFolders(true); });
   window.onFoldersChanged = async () => {
     await loadFolders(true);
     if (folderState.list.length) openFolder(folderState.list[folderState.list.length - 1]);   // show what was just added
   };
   loadFolders();
+  setTimeout(() => revalidateFolders(false), 5000);          // quiet background rescan once per launch
 }
 
 /* ---------- android app: lockscreen / notification controls ----------
@@ -1578,6 +1789,22 @@ function reportState() {
   }, 120);
 }
 ['play', 'pause', 'seeked', 'loadedmetadata', 'durationchange'].forEach(ev => audio.addEventListener(ev, reportState));
+/* Android back button / back swipe: undo the innermost thing that is open. Returns true if it handled it;
+   false means "nothing left - go to the home screen" (the app keeps running in the background). */
+window.__back = () => {
+  if (!IS_ANDROID) return false;
+  const m = $('#modal'); if (m) { closeModal(); return true; }                        // popup
+  if (selection.size) { selClear(); return true; }                                    // selection
+  const a = document.activeElement; if (a && a.matches && a.matches('input[type=text]')) { a.blur(); return true; }
+  if (viewMode === 'library') {
+    const k = folderState.listOn;
+    if (k === 'playlists' && plView.mode !== 'root') { plView = { mode: 'root' }; renderPlaylists(); return true; }   // playlist / liked -> playlists
+    if (k === 'folders' && folderState.open) { folderState.open = null; renderFolders(); return true; }              // open folder -> folders
+    if (k) { libOpen(null); return true; }                                                                          // a library list -> the library menu
+  }
+  if (viewMode !== 'tape') { setView('tape'); return true; }                         // any other page -> the cassette deck
+  return false;
+};
 window.__cmd = c => {
   if (c === 'play') play();
   else if (c === 'pause') audio.pause();

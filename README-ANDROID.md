@@ -36,3 +36,9 @@ Allow notifications on first launch (needed for background playback).
 ## Notes
 - This is a debug-signed APK (fine for personal use). For Play Store you'd need a release keystore.
 - Chaquopy 16.0.0 / AGP 8.5.2 are set in `build.gradle`; bump them if a newer sync warning appears.
+
+## Discover (radio) mode
+Press **DISC** (or `D` on a keyboard). While it's on, the app keeps the queue topped up with songs
+similar to the one playing, using YouTube's own "Mix" recommendations. Picks are semi-random (close matches +
+older leftovers, and every 5th hop it jumps off an earlier song), never repeat, and skip clips / hour-long videos.
+Works with local files too (it matches by artist/title). Unplayable songs are skipped automatically.

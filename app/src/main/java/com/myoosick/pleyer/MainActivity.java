@@ -199,9 +199,12 @@ public class MainActivity extends Activity {
     // NOTE: onPause() is intentionally NOT forwarded to the WebView, so audio keeps playing
     // when the app is backgrounded or the screen turns off.
 
+    /** Back button / back swipe: let the page close whatever is open first (popup, selection, folder, list...).
+     *  When the page has nothing left to close (it is on the cassette deck), the app goes to the background. */
     @Override
     public void onBackPressed() {
-        if (web.canGoBack()) web.goBack();
-        else moveTaskToBack(true);   // keep playing; use the notification to return
+        web.evaluateJavascript("(window.__back ? window.__back() : false)", value -> {
+            if (!"true".equals(value)) moveTaskToBack(true);   // keep playing; use the notification to return
+        });
     }
 }

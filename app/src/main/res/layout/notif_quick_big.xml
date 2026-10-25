@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+    android:background="@drawable/np_wood" android:padding="4dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+        android:background="@drawable/np_deck" android:padding="8dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+            android:gravity="center_vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="MYOOSICK PLEYER"
+                android:fontFamily="monospace" android:textStyle="bold" android:textSize="11sp" android:textColor="#FF2A241C" android:singleLine="true"/>
+            <ImageView android:layout_width="0dp" android:layout_height="12dp" android:layout_weight="1" android:layout_marginLeft="8dp"
+                android:background="@drawable/np_stripes"/>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/np_lcd" android:paddingLeft="9dp" android:paddingRight="9dp" android:paddingTop="6dp" android:paddingBottom="6dp"
+            android:layout_marginTop="6dp">
+            <TextView android:id="@+id/q_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:fontFamily="monospace" android:textStyle="bold" android:textSize="15sp" android:textColor="#FFFFB000"
+                android:singleLine="true" android:ellipsize="end"/>
+            <TextView android:id="@+id/q_sub" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:fontFamily="monospace" android:textSize="12sp" android:textColor="#FFC98A00"
+                android:singleLine="true" android:ellipsize="end"/>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp">
+            <ImageButton android:id="@+id/q_prev" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1"
+                android:layout_marginLeft="3dp" android:layout_marginRight="3dp"
+                android:background="@drawable/np_key" android:padding="9dp" android:scaleType="centerInside"
+                android:tint="#FF2A241C" android:contentDescription="Previous"/>
+            <ImageButton android:id="@+id/q_play" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1.4"
+                android:layout_marginLeft="3dp" android:layout_marginRight="3dp"
+                android:background="@drawable/np_key" android:padding="9dp" android:scaleType="centerInside"
+                android:tint="#FF2A241C" android:contentDescription="Play or pause"/>
+            <ImageButton android:id="@+id/q_next" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1"
+                android:layout_marginLeft="3dp" android:layout_marginRight="3dp"
+                android:background="@drawable/np_key" android:padding="9dp" android:scaleType="centerInside"
+                android:tint="#FF2A241C" android:contentDescription="Next"/>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="4dp">
+            <ImageButton android:id="@+id/q_shuf" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1"
+                android:layout_marginLeft="3dp" android:layout_marginRight="3dp"
+                android:background="@drawable/np_key" android:padding="9dp" android:scaleType="centerInside"
+                android:tint="#FF2A241C" android:contentDescription="Shuffle"/>
+            <ImageButton android:id="@+id/q_rep" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1"
+                android:layout_marginLeft="3dp" android:layout_marginRight="3dp"
+                android:background="@drawable/np_key" android:padding="9dp" android:scaleType="centerInside"
+                android:tint="#FF2A241C" android:contentDescription="Repeat"/>
+            <ImageButton android:id="@+id/q_disc" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1"
+                android:layout_marginLeft="3dp" android:layout_marginRight="3dp"
+                android:background="@drawable/np_key" android:padding="9dp" android:scaleType="centerInside"
+                android:tint="#FF2A241C" android:contentDescription="Radio"/>
+            <ImageButton android:id="@+id/q_vdn" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1"
+                android:layout_marginLeft="3dp" android:layout_marginRight="3dp"
+                android:background="@drawable/np_key" android:padding="9dp" android:scaleType="centerInside"
+                android:tint="#FF2A241C" android:contentDescription="Volume down"/>
+            <ImageButton android:id="@+id/q_vup" android:layout_width="0dp" android:layout_height="38dp" android:layout_weight="1"
+                android:layout_marginLeft="3dp" android:layout_marginRight="3dp"
+                android:background="@drawable/np_key" android:padding="9dp" android:scaleType="centerInside"
+                android:tint="#FF2A241C" android:contentDescription="Volume up"/>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
