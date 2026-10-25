@@ -287,6 +287,26 @@ html.android .reel, html.android .ts-reel{animation-timing-function:steps(24)}
 html.android .thumb{filter:none}
 html.android .toast{box-shadow:0 4px 8px rgba(0,0,0,.5)}
 html.android button, html.android .row, html.android .tab, html.android input{touch-action:manipulation}
+/* ---- selection bar, popups, playlists ---- */
+#selBar{position:fixed; top:6px; left:6px; right:6px; z-index:80; display:none; gap:6px; align-items:center; padding:6px; background:var(--lcd-bg); border:2px solid var(--amber); border-radius:6px}
+#selBar .btn{padding:8px 6px; font-size:8px; min-width:0; flex:none}
+#selCount{font-family:var(--px); font-size:8px; color:var(--amber); flex:1 1 auto; white-space:nowrap}
+.row.liked .t::after{content:' \2665'; color:#ff5a3c}
+.row.cur.liked .t::after{color:#150e00}
+.row.picked{background:#3a2a08; box-shadow:inset 0 0 0 2px var(--amber)}
+.row.picked.cur{background:#7a5600; color:var(--amber)}
+#modal{position:fixed; inset:0; z-index:90; background:rgba(0,0,0,.65); display:flex; align-items:center; justify-content:center; padding:16px}
+#modal .mbox{width:100%; max-width:420px; max-height:80%; display:flex; flex-direction:column; background:var(--lcd-bg); color:var(--amber); border:3px solid var(--amber); border-radius:8px; padding:12px}
+#modal .mtitle{font-family:var(--px); font-size:9px; line-height:1.6; margin-bottom:10px}
+#modal .mbody{min-height:0; overflow:auto; font-size:20px; line-height:1.15}
+#modal input[type=text]{width:100%; font-size:22px; background:#000; color:var(--amber); border:2px solid var(--amber-soft); padding:8px; font-family:var(--vt)}
+#modal .mbtns{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap}
+.mrow{padding:9px 6px; border-bottom:1px solid #2a1c00; cursor:pointer; font-size:21px}
+.mrow.on{background:var(--amber); color:#150e00}
+.mrow.newp{color:var(--teal,#2f8f85); color:#7fe0d4}
+.irow{padding:3px 0; word-break:break-all}
+.ilist{margin-top:8px; padding-top:6px; border-top:1px dashed var(--amber-dim); max-height:30vh; overflow:auto; opacity:.85; font-size:18px}
+.pname{font-size:22px; color:var(--amber); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1}
 @media (max-height:660px){ html.android #viz{display:none} }
 @media (max-height:520px){ html.android .lcd, html.android .seekwrap, html.android .controls, html.android .mix{display:none} }  /* keyboard open */
 </style>
@@ -520,13 +540,13 @@ function renderQueueList() {
   }
   state.queue.forEach((t, i) => {
     const isCur = i === state.index;
-    box.append(h('div', { class: 'row' + (isCur ? ' cur' : ''), onclick: () => playIndex(i) },
+    box.append(A(h('div', { class: 'row' + (isCur ? ' cur' : ''), onclick: () => playIndex(i) },
       h('div', { class: 'idx' }, isCur && !audio.paused ? '▶' : String(i + 1).padStart(2, '0')),
       h('div', { class: 'info' },
         h('div', { class: 't' }, h('span', { class: 'tag' }, srcTag(t)), t.title),
         t.artist ? h('div', { class: 's' }, t.artist) : null),
       h('div', { class: 'd' }, fmt(t.duration)),
-      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Remove', onclick: e => { e.stopPropagation(); removeAt(i); } }, '✕'))));
+      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Remove', onclick: e => { e.stopPropagation(); removeAt(i); } }, '✕'))), () => t));
   });
   const c = box.querySelector('.row.cur'); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'nearest' });
 }
@@ -912,14 +932,14 @@ const webTrack = r => mkTrack({ title: r.title, artist: r.uploader, duration: r.
 function webRow(res) {
   const dlBtn = h('button', { class: 'mini', title: 'Download to library' }, '⬇');
   dlBtn.onclick = ev => { ev.stopPropagation(); startDownload(res, dlBtn); };
-  return h('div', { class: 'row res', onclick: () => addTracks([webTrack(res)], { play: true }) },
+  return A(h('div', { class: 'row res', onclick: () => addTracks([webTrack(res)], { play: true }) },
     h('img', { class: 'thumb', src: res.thumbnail || '', alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' }),
     h('div', { class: 'info' }, h('div', { class: 't' }, res.title), h('div', { class: 's' }, res.uploader || '')),
     h('div', { class: 'd' }, fmt(res.duration)),
     h('div', { class: 'acts' },
       h('button', { class: 'mini', title: 'Play now', onclick: ev => { ev.stopPropagation(); addTracks([webTrack(res)], { play: true }); } }, '▶'),
       h('button', { class: 'mini', title: 'Add to queue', onclick: ev => { ev.stopPropagation(); addTracks([webTrack(res)]); toast('ADDED TO QUEUE'); } }, '+'),
-      dlBtn));
+      dlBtn)), () => webTrack(res));
 }
 
 /* android: search the music folders added to the library (scans each folder once, then keeps the list) */
@@ -948,11 +968,11 @@ function localRows(files) {
   const rows = [h('div', { class: 'hint' }, `ON THIS PHONE (${files.length})`)];
   files.slice(0, 50).forEach(({ t, all, name }) => {
     const tr = folderTrack(t);
-    rows.push(h('div', { class: 'row', onclick: () => playFolderFrom(all, all.indexOf(t), name) },
+    rows.push(A(h('div', { class: 'row', onclick: () => playFolderFrom(all, all.indexOf(t), name) },
       h('div', { class: 'idx' }, '♪'),
       h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
       h('div', { class: 'd' }, ''),
-      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))));
+      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))), () => folderTrack(t)));
   });
   if (files.length > 50) rows.push(h('div', { class: 'hint' }, `+${files.length - 50} MORE. REFINE YOUR SEARCH.`));
   return rows;
@@ -1028,7 +1048,7 @@ function renderDownloads() {
 }
 
 /* ---------- library ---------- */
-const diskTrack = f => mkTrack({ title: stem(f.name), source: 'disk', src: '/downloads/' + encodeURIComponent(f.name), ref: f.name });
+const diskTrack = f => mkTrack({ title: stem(f.name), source: 'disk', fname: f.name, path: 'SAVED', size: f.size || 0, src: '/downloads/' + encodeURIComponent(f.name), ref: f.name });
 async function loadLibrary() {
   try {
     const j = await (await fetch('/api/library')).json();
@@ -1038,7 +1058,7 @@ async function loadLibrary() {
 function renderLibrary() {
   const box = $('#library'); box.replaceChildren();
   if (!state.library.length) return IS_ANDROID ? undefined : box.append(h('div', { class: 'empty' }, 'NOTHING SAVED YET.\nUSE ⬇ IN SEARCH TO RECORD A TAPE.'));
-  state.library.forEach(f => box.append(h('div', { class: 'row', onclick: () => addTracks([diskTrack(f)], { play: true }) },
+  state.library.forEach(f => box.append(A(h('div', { class: 'row', onclick: () => addTracks([diskTrack(f)], { play: true }) },
     h('div', { class: 'idx' }, '♪'),
     h('div', { class: 'info' }, h('div', { class: 't' }, stem(f.name)), h('div', { class: 's' }, fmtSize(f.size) + ' · ' + f.name.split('.').pop().toUpperCase())),
     h('div', { class: 'd' }, ''),
@@ -1048,7 +1068,7 @@ function renderLibrary() {
         e.stopPropagation();
         if (!confirm('Delete "' + f.name + '" from disk?')) return;
         await fetch('/api/library/' + encodeURIComponent(f.name), { method: 'DELETE' }); loadLibrary();
-      } }, '✕')))));
+      } }, '✕'))), () => diskTrack(f))));
 }
 $('#btnRefresh').onclick = loadLibrary;
 $('#btnAddAll').onclick = () => { if (!state.library.length) return toast('LIBRARY IS EMPTY', true); addTracks(state.library.map(diskTrack)); toast(`ADDED ${state.library.length} TAPES`); };
@@ -1145,6 +1165,221 @@ addEventListener('keydown', e => {
   else if (k === '/') { e.preventDefault(); showTab('search'); }
 });
 
+/* ---------- playlists, likes, and multi-select (long-press a song; swipe right to like) ---------- */
+const PL_KEY = 'myoosick_pleyer.playlists';
+let plData = { playlists: [], liked: [], meta: {} }, plTimer = null, plView = { mode: 'root' };
+try { const j = JSON.parse(localStorage.getItem(PL_KEY) || 'null'); if (j && j.playlists) plData = j; } catch (e) {}
+function savePl() { clearTimeout(plTimer); plTimer = setTimeout(() => { try { localStorage.setItem(PL_KEY, JSON.stringify(plData)); } catch (e) {} }, 300); }
+const snapOf = t => ({ source: t.source, title: t.title, artist: t.artist || '', src: t.src, ref: t.ref, thumb: t.thumb || null, duration: t.duration || null, path: t.path || '', fname: t.fname || '', size: t.size || 0 });
+const savable = t => t.source !== 'local';
+function plGC() {
+  const keep = new Set([...plData.liked, ...plData.playlists.flatMap(p => p.items)]);
+  for (const k of Object.keys(plData.meta)) if (!keep.has(k)) delete plData.meta[k];
+}
+const isLiked = t => plData.liked.includes(statKey(t));
+function toggleLike(t) {
+  if (!savable(t)) return toast("THIS FILE CAN'T BE SAVED", true);
+  const k = statKey(t), i = plData.liked.indexOf(k);
+  if (i >= 0) { plData.liked.splice(i, 1); toast('♥ UNLIKED'); }
+  else { plData.liked.unshift(k); plData.meta[k] = snapOf(t); toast('♥ LIKED: ' + t.title.slice(0, 30)); }
+  plGC(); savePl(); plRefresh(); likeMarks();
+}
+function newPlaylist(name) {
+  const p = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, items: [] };
+  plData.playlists.push(p); savePl(); return p;
+}
+function likeMarks() {
+  document.querySelectorAll('.row').forEach(r => { if (r._gt) { try { r.classList.toggle('liked', isLiked(r._gt())); } catch (e) {} } });
+}
+function plRefresh() { if (typeof folderState !== 'undefined' && folderState.listOn === 'playlists') renderPlaylists(); }
+
+/* selection */
+const selection = new Map();    // song key -> track
+function selUpdate() {
+  const bar = $('#selBar'); if (!bar) return;
+  bar.style.display = selection.size ? 'flex' : 'none';
+  $('#selCount').textContent = selection.size + ' SEL';
+}
+function selToggle(el) {
+  const t = el._gt(), k = statKey(t);
+  if (selection.has(k)) { selection.delete(k); el.classList.remove('picked'); }
+  else { selection.set(k, t); el.classList.add('picked'); }
+  selUpdate();
+}
+function selClear() { selection.clear(); document.querySelectorAll('.row.picked').forEach(e => e.classList.remove('picked')); selUpdate(); }
+function A(el, getTrack) { attachRow(el, getTrack); return el; }
+function attachRow(el, getTrack) {
+  el._gt = getTrack; el.style.touchAction = 'pan-y';
+  try { const k = statKey(getTrack()); if (plData.liked.includes(k)) el.classList.add('liked'); if (selection.size && selection.has(k)) el.classList.add('picked'); } catch (e) {}
+  let x0 = 0, y0 = 0, dx = 0, timer = null, active = false;
+  const stop = () => { clearTimeout(timer); timer = null; };
+  const reset = () => { stop(); active = false; el.style.transform = ''; };
+  el.addEventListener('contextmenu', e => e.preventDefault());
+  el.addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return;
+    active = true; x0 = e.clientX; y0 = e.clientY; dx = 0; el._lp = false; stop();
+    timer = setTimeout(() => {                                   // long press: select / unselect
+      timer = null; active = false; el._lp = true; el.style.transform = '';
+      try { navigator.vibrate && navigator.vibrate(15); } catch (_) {}
+      selToggle(el);
+    }, 500);
+  });
+  el.addEventListener('pointermove', e => {
+    if (!active) return;
+    dx = e.clientX - x0; const dy = e.clientY - y0;
+    if (Math.abs(dy) > 12 || dx < -12) return reset();          // scrolling / left swipe: not ours
+    if (dx > 10) { stop(); el.style.transform = 'translateX(' + Math.min(dx, 90) + 'px)'; }
+  });
+  el.addEventListener('pointerup', () => {
+    const liked = active && dx > 70;
+    reset();
+    if (liked) { el._lp = true; toggleLike(getTrack()); }       // swipe right: like
+  });
+  el.addEventListener('pointercancel', reset);
+  el.addEventListener('click', e => {
+    if (e.target.closest('button')) return;
+    if (el._lp) { el._lp = false; e.stopImmediatePropagation(); e.preventDefault(); return; }
+    if (selection.size) { e.stopImmediatePropagation(); e.preventDefault(); selToggle(el); }
+  }, true);
+}
+
+/* popups */
+function closeModal() { const m = $('#modal'); if (m) m.remove(); }
+function modal(title, body, buttons) {
+  closeModal();
+  const m = h('div', { id: 'modal' }, h('div', { class: 'mbox' },
+    h('div', { class: 'mtitle' }, title), h('div', { class: 'mbody' }, body),
+    h('div', { class: 'mbtns' }, buttons.map(([label, fn]) => h('button', { class: 'btn sm', onclick: () => fn() }, label)))));
+  document.body.append(m); return m;
+}
+function askText(title, initial = '') {
+  return new Promise(res => {
+    const inp = h('input', { type: 'text', value: initial, maxlength: '40', autocomplete: 'off', spellcheck: 'false' });
+    modal(title, inp, [['OK', () => { closeModal(); res(inp.value.trim() || null); }], ['CANCEL', () => { closeModal(); res(null); }]]);
+    setTimeout(() => inp.focus(), 60);
+  });
+}
+function selTracks() { return [...selection.values()]; }
+function addToPlaylists(tracks, ids) {
+  let added = 0;
+  for (const id of ids) {
+    const p = plData.playlists.find(x => x.id === id); if (!p) continue;
+    for (const t of tracks) { const k = statKey(t); if (!p.items.includes(k)) { p.items.push(k); added++; } plData.meta[k] = snapOf(t); }
+  }
+  savePl(); plRefresh();
+  return added;
+}
+function openAddToPlaylist(chosen = new Set()) {
+  const tracks = selTracks().filter(savable);
+  if (!tracks.length) return toast("THESE FILES CAN'T BE SAVED", true);
+  const list = h('div', { class: 'mlist' });
+  const draw = () => {
+    list.replaceChildren(h('div', { class: 'mrow newp', onclick: async () => {
+        const n = await askText('NEW PLAYLIST'); if (n) chosen.add(newPlaylist(n).id);
+        openAddToPlaylist(chosen);
+      } }, '+ NEW PLAYLIST'),
+      ...plData.playlists.map(p => h('div', { class: 'mrow' + (chosen.has(p.id) ? ' on' : ''), onclick: () => { chosen.has(p.id) ? chosen.delete(p.id) : chosen.add(p.id); draw(); } },
+        (chosen.has(p.id) ? '[X] ' : '[ ] ') + p.name + ' (' + p.items.length + ')')));
+  };
+  draw();
+  modal(`ADD ${tracks.length} SONG${tracks.length > 1 ? 'S' : ''} TO...`, list, [
+    ['ADD', () => {
+      if (!chosen.size) return toast('PICK A PLAYLIST', true);
+      const n = addToPlaylists(tracks, chosen); closeModal(); selClear();
+      toast(n ? `ADDED ${n} TO ${chosen.size} PLAYLIST${chosen.size > 1 ? 'S' : ''}` : 'ALREADY THERE');
+    }],
+    ['CANCEL', closeModal]]);
+}
+function selQueue() {
+  const ts = selTracks(); if (!ts.length) return;
+  addTracks(ts.map(t => mkTrack({ ...t, dir: false }))); selClear(); toast(`ADDED ${ts.length} TO QUEUE`);
+}
+function selLike() {
+  const ts = selTracks().filter(savable); let n = 0;
+  for (const t of ts) { const k = statKey(t); if (!plData.liked.includes(k)) { plData.liked.unshift(k); plData.meta[k] = snapOf(t); n++; } }
+  savePl(); plRefresh(); likeMarks(); selClear(); toast(n ? `♥ LIKED ${n} SONG${n > 1 ? 'S' : ''}` : 'ALREADY LIKED');
+}
+function selInfo() {
+  const ts = selTracks(); if (!ts.length) return;
+  const rows = [];
+  if (ts.length === 1) {
+    const t = ts[0];
+    rows.push(['TITLE', t.title], ['ARTIST', t.artist || '-'], ['SOURCE', srcTag(t)]);
+    if (t.duration) rows.push(['LENGTH', fmt(t.duration)]);
+    if (t.fname) rows.push(['FILE', t.fname]);
+    if (t.path) rows.push(['FOLDER', t.path]);
+    if (t.size) rows.push(['SIZE', fmtSize(t.size)]);
+    if (t.source === 'web' && t.ref) rows.push(['LINK', t.ref]);
+    rows.push(['PLAYS', String(stats.n[statKey(t)] || 0)], ['LIKED', isLiked(t) ? 'YES' : 'NO']);
+  } else {
+    const total = ts.reduce((a, t) => a + (t.duration || 0), 0);
+    rows.push(['SONGS', String(ts.length)]);
+    if (total) rows.push(['TOTAL TIME', fmt(total)]);
+    rows.push(['SOURCES', ['folder', 'disk', 'web', 'local'].map(k => [k, ts.filter(t => t.source === k).length]).filter(x => x[1]).map(([k, n]) => `${n} ${srcTag({ source: k })}`).join(', ')]);
+  }
+  const body = h('div', { class: 'info-list' }, rows.map(([k, v]) => h('div', { class: 'irow' }, h('b', {}, k + ': '), v)),
+    ts.length > 1 ? h('div', { class: 'ilist' }, ts.map(t => h('div', {}, '• ' + t.title))) : null);
+  modal('SONG INFO', body, [['CLOSE', closeModal]]);
+}
+(function buildSelBar() {
+  const b = (label, fn) => h('button', { class: 'btn sm', onclick: fn }, label);
+  document.body.append(h('div', { id: 'selBar', style: 'display:none' }, h('span', { id: 'selCount' }, ''),
+    b('+ LIST', () => openAddToPlaylist()), b('+ QUEUE', selQueue), b('♥', selLike), b('INFO', selInfo), b('✕', selClear)));
+})();
+
+/* playlists screen (inside the library) */
+function heartIcon() {
+  const rows = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
+  let d = ''; rows.forEach((r, y) => [...r].forEach((c, x) => { if (c === 'X') d += `M${x},${y}h1v1h-1z`; }));
+  const sp = document.createElement('span');
+  sp.innerHTML = `<svg viewBox="0 0 7 6" width="21" height="18" shape-rendering="crispEdges" style="display:block"><path fill="#e0412b" stroke="#2a241c" stroke-width=".35" d="${d}"/></svg>`;
+  return sp;
+}
+function renderSongList(box, title, keys, pl) {
+  const files = keys.filter(k => plData.meta[k]).map(k => ({ trk: plData.meta[k], key: k }));
+  if (!files.length) return box.append(h('div', { class: 'empty' }, pl ? 'EMPTY PLAYLIST.\nLONG-PRESS SONGS TO ADD THEM.' : 'NO LIKED SONGS YET.\nSWIPE A SONG TO THE RIGHT.'));
+  box.append(h('div', { class: 'bar' }, h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, title, true) }, '▶ PLAY ALL')));
+  files.forEach((t, i) => {
+    const tr = folderTrack(t);
+    box.append(A(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, title) },
+      h('div', { class: 'idx' }, String(i + 1)),
+      h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
+      h('div', { class: 'd' }, ''),
+      h('div', { class: 'acts' },
+        h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'),
+        h('button', { class: 'mini', title: 'Remove', onclick: e => {
+          e.stopPropagation();
+          const arr = pl ? pl.items : plData.liked, j = arr.indexOf(t.key); if (j >= 0) arr.splice(j, 1);
+          plGC(); savePl(); renderPlaylists();
+        } }, '✕'))), () => folderTrack(t)));
+  });
+}
+function renderPlaylists() {
+  const box = $('#recentBox'); box.replaceChildren();
+  box.append(h('div', { class: 'bar' },
+    h('button', { class: 'btn sm', onclick: async () => { const n = await askText('NEW PLAYLIST'); if (n) { newPlaylist(n); plView = { mode: 'root' }; renderPlaylists(); } } }, '+ PLAYLIST'),
+    h('button', { class: 'btn sm' + (plView.mode === 'liked' ? ' sel' : ''), title: 'Liked songs', onclick: () => { plView = { mode: plView.mode === 'liked' ? 'root' : 'liked' }; renderPlaylists(); } }, heartIcon())));
+  if (plView.mode === 'liked') return renderSongList(box, 'LIKED', plData.liked, null);
+  if (plView.mode === 'pl') {
+    const p = plData.playlists.find(x => x.id === plView.id);
+    if (!p) { plView = { mode: 'root' }; return renderPlaylists(); }
+    box.append(h('div', { class: 'bar' }, h('button', { class: 'btn sm', onclick: () => { plView = { mode: 'root' }; renderPlaylists(); } }, '◀ BACK'), h('span', { class: 'pname' }, p.name)));
+    return renderSongList(box, p.name, p.items, p);
+  }
+  if (!plData.playlists.length) return box.append(h('div', { class: 'empty' }, 'NO PLAYLISTS YET.\nTAP + PLAYLIST.'));
+  plData.playlists.forEach(p => box.append(h('div', { class: 'row', onclick: () => { plView = { mode: 'pl', id: p.id }; renderPlaylists(); } },
+    h('div', { class: 'idx' }, '♪'),
+    h('div', { class: 'info' }, h('div', { class: 't' }, p.name), h('div', { class: 's' }, p.items.length + ' SONGS')),
+    h('div', { class: 'd' }, ''),
+    h('div', { class: 'acts' },
+      h('button', { class: 'mini', title: 'Rename', onclick: async e => { e.stopPropagation(); const n = await askText('RENAME PLAYLIST', p.name); if (n) { p.name = n; savePl(); renderPlaylists(); } } }, 'EDIT'),
+      h('button', { class: 'mini', title: 'Delete', onclick: e => {
+        e.stopPropagation();
+        if (!confirm('Delete playlist "' + p.name + '"?')) return;
+        plData.playlists = plData.playlists.filter(x => x !== p); plGC(); savePl(); renderPlaylists();
+      } }, '✕')))));
+}
+
 /* ---------- play statistics: MOST PLAYED (top 100, needs 2+ plays) and RECENTLY PLAYED (last 100) ----------
    A song counts as played once it has actually played for ~5 seconds. Everything is kept on the phone. */
 const STATS_KEY = 'myoosick_pleyer.stats', LIST_MAX = 100;
@@ -1206,7 +1441,7 @@ function folderTrack(t) {
   if (t.trk) return mkTrack({ ...t.trk });
   if (t.disk) return diskTrack(t.f);
   const base = stem(t.name), m = base.match(/^(.+?)\s+-\s+(.+)$/);
-  return mkTrack({ title: m ? m[2] : base, artist: m ? m[1] : (t.path || ''), source: 'folder',
+  return mkTrack({ title: m ? m[2] : base, artist: m ? m[1] : (t.path || ''), source: 'folder', path: t.path || '', fname: t.name, size: t.size || 0,
     src: '/saf/file?u=' + encodeURIComponent(t.uri) + '&n=' + encodeURIComponent(t.name), ref: t.uri });
 }
 function playFolderFrom(files, i, name, random) {   // play straight from the folder (in order / shuffled); the queue is untouched
@@ -1239,18 +1474,18 @@ function renderFolders() {
       h('button', { class: 'btn sm', onclick: () => { addTracks(files.map(folderTrack)); toast(`ADDED ${files.length} TRACKS`); } }, '+ ADD ALL')));
     files.slice(0, folderState.shown).forEach((t, i) => {
       const tr = folderTrack(t);
-      box.append(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, f.name) },
+      box.append(A(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, f.name) },
         h('div', { class: 'idx' }, String(i + 1)),
         h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
         h('div', { class: 'd' }, ''),
-        h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))));
+        h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))), () => folderTrack(t)));
     });
     if (files.length > folderState.shown) box.append(h('div', { class: 'row', onclick: () => { folderState.shown += 200; renderFolders(); } },
       h('div', { class: 'idx' }, '…'), h('div', { class: 'info' }, h('div', { class: 't' }, `SHOW MORE (${files.length - folderState.shown} LEFT)`)), h('div', { class: 'd' }, ''), h('div', { class: 'acts' })));
   });
 }
 /* android library: lists shown in place of the folders - ADDED (100 newest files), PLAYED (last 100 played), MOST (top 100 by plays) */
-const LISTS = { added: 'ADDED', played: 'PLAYED', most: 'MOST PLAYED' };
+const LISTS = { added: 'ADDED', played: 'PLAYED', most: 'MOST PLAYED', playlists: 'PLAYLISTS' };
 async function showLibList(kind) {
   if (folderState.listOn === kind) kind = null;            // tapping the active button closes it
   folderState.listOn = kind;
@@ -1259,6 +1494,7 @@ async function showLibList(kind) {
   $('#foldersBox').style.display = kind ? 'none' : 'block';
   $('#downloads').style.display = kind ? 'none' : ''; $('#library').style.display = kind ? 'none' : '';
   if (!kind) return;
+  if (kind === 'playlists') { plView = { mode: 'root' }; return renderPlaylists(); }
   const box = $('#recentBox'); box.replaceChildren(h('div', { class: 'empty' }, 'LOADING...'));
   let files = [], hint = '';
   if (kind === 'added') {
@@ -1279,11 +1515,11 @@ async function showLibList(kind) {
   box.append(h('div', { class: 'bar' }, h('button', { class: 'btn sm', onclick: () => playFolderFrom(files, 0, LISTS[kind], true) }, '▶ PLAY ALL')));
   files.forEach((t, i) => {
     const tr = folderTrack(t);
-    box.append(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, LISTS[kind]) },
+    box.append(A(h('div', { class: 'row', onclick: () => playFolderFrom(files, i, LISTS[kind]) },
       h('div', { class: 'idx' }, String(i + 1)),
       h('div', { class: 'info' }, h('div', { class: 't' }, tr.title), tr.artist ? h('div', { class: 's' }, tr.artist) : null),
       h('div', { class: 'd' }, kind === 'most' ? t.plays + 'x' : ''),
-      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))));
+      h('div', { class: 'acts' }, h('button', { class: 'mini', title: 'Add to queue', onclick: e => { e.stopPropagation(); addTracks([folderTrack(t)]); toast('ADDED TO QUEUE'); } }, '+'))), () => folderTrack(t)));
   });
 }
 function setupAndroidFolders() {
