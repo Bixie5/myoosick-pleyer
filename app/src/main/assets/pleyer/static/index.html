@@ -288,9 +288,10 @@ html.android .thumb{filter:none}
 html.android .toast{box-shadow:0 4px 8px rgba(0,0,0,.5)}
 html.android button, html.android .row, html.android .tab, html.android input{touch-action:manipulation}
 /* ---- library menu (android) ---- */
-#libMenu{display:flex; flex-direction:column; gap:8px; padding:10px}
-.libbtn{width:100%; justify-content:flex-start; font-size:11px; padding:15px 14px; letter-spacing:1px}
-html.android .libbtn.active{background:linear-gradient(#e8a21a,#ffd27a); box-shadow:0 1px 0 #8a5d00, inset 0 3px 6px rgba(0,0,0,.25); transform:translateY(3px)}
+#libMenu{display:flex; flex-direction:column; gap:8px; padding:10px; border-bottom:2px dashed var(--amber-dim)}
+.libbtn.btn{width:100%; justify-content:flex-start; font-size:8px; padding:9px 10px; letter-spacing:1px; background:linear-gradient(#3a2a08,#1f1500); color:var(--amber); border-color:var(--amber-soft); box-shadow:0 4px 0 #000, inset 0 1px 0 rgba(255,176,0,.35); text-shadow:none}
+.libbtn.btn:active{transform:translateY(3px); box-shadow:0 1px 0 #000}
+html.android .libbtn.btn.active{background:var(--amber); color:#150e00; box-shadow:0 1px 0 #000; transform:translateY(3px)}
 /* ---- selection bar, popups, playlists ---- */
 #selBar{position:fixed; top:6px; left:6px; right:6px; z-index:80; display:none; gap:6px; align-items:center; padding:6px; background:var(--lcd-bg); border:2px solid var(--amber); border-radius:6px}
 #selBar .btn{padding:8px 6px; font-size:8px; min-width:0; flex:none}
